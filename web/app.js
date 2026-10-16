@@ -18,9 +18,12 @@ const paths = {
   chevron: '<path d="m9 5 7 7-7 7"/>',
   note: '<path d="M4 4h16v12l-4 4H4V4Zm12 16v-4h4M8 8h8m-8 4h5"/>',
   spark: '<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/>',
+  moon: '<path d="M20.5 13A8.5 8.5 0 0 1 11 3.5 8.5 8.5 0 1 0 20.5 13Z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/>',
 };
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.list}</svg>`;
 const initials = name => name.trim().split(/\s+/).map(s => s[0]).slice(0, 2).join('').toUpperCase();
+const themeButton = (auth = false) => `<button type="button" class="theme-toggle${auth ? ' auth-theme-toggle' : ''}" data-command="toggle-theme" aria-label="Switch to dark mode" aria-pressed="false"><span data-theme-icon="moon">${icon('moon')}</span><span data-theme-icon="sun" hidden>${icon('sun')}</span>${auth ? '<span class="theme-label">Dark mode</span>' : ''}</button>`;
 const app = $('#app');
 const dialog = $('#dialog');
 let state = null;
@@ -88,7 +91,7 @@ function renderAuth(mode, error = '') {
       <div class="notebook-illustration" aria-hidden="true"><div class="paper-label">THE GOOD KIND OF PLANS ${icon('spark')}</div><div class="paper-row checked"><span>✓</span>Find our next adventure</div><div class="paper-row checked"><span>✓</span>Bring the good company</div><div class="paper-row"><span></span>Make a little time together</div><div class="paper-footer">A plan is better when it’s shared. <span>↗</span></div></div></div>
       <div class="story-footer">A shared notebook. A clearer head. ${icon('lock')} Private by invitation.</div>
     </section>
-    <section class="auth-form-area"><div class="auth-card"><span class="small-mark">${icon(create ? 'spark' : 'list')}</span>
+    <section class="auth-form-area">${themeButton(true)}<div class="auth-card"><span class="small-mark">${icon(create ? 'spark' : 'list')}</span>
       <span class="eyebrow">${mode === 'setup' ? 'A FRESH START' : mode === 'register' ? 'YOU’RE INVITED' : 'YOUR PLANS ARE WAITING'}</span>
       <h2>${mode === 'setup' ? 'Make yourself at home.' : mode === 'register' ? 'Better, together.' : 'Welcome back.'}</h2>
       <p>${mode === 'setup' ? 'Create the first account for your notebook. You’ll be the owner and can invite your friends.' : mode === 'register' ? 'Create your account using the email address your friend invited.' : 'Sign in to your shared notebook. Pick up right where you left off.'}</p>
@@ -103,6 +106,7 @@ function renderAuth(mode, error = '') {
       <div class="auth-private">${icon('lock')} Your notebook is only visible to invited members.</div>
     </div><span class="auth-bottom">Less organizing. More living.</span></section>
   </main>`;
+  window.togetherTheme.sync();
   $('#auth-form').addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -131,7 +135,7 @@ function shell() {
       <button class="user-profile" data-command="account"><span class="avatar" id="my-avatar"></span><span><strong id="my-name"></strong><small>Account settings</small></span>${icon('more')}</button></div>
     </aside>
     <div class="main-wrap"><header class="topbar"><div class="breadcrumbs"><button class="icon-button mobile-toggle" data-command="mobile-menu" aria-label="Open navigation">${icon('menu')}</button>${icon('list')}<span id="breadcrumb-notebook">Our notebook</span>${icon('chevron')}<strong id="breadcrumb-list">Your lists</strong></div>
-      <div class="topbar-right"><span id="connection" class="connection connecting"><span></span>Connecting</span><div id="member-avatars" class="avatar-group"></div><button class="primary compact" data-command="invite">${icon('users')}<span>Invite friends</span></button></div></header>
+      <div class="topbar-right"><span id="connection" class="connection connecting"><span></span>Connecting</span><div id="member-avatars" class="avatar-group"></div>${themeButton()}<button class="primary compact" data-command="invite">${icon('users')}<span>Invite friends</span></button></div></header>
       <main class="main-content"><div class="page-intro"><span class="eyebrow">A LITTLE LESS TO REMEMBER</span><p>Make a plan. Share the load. Enjoy the little wins.</p></div>
         <section id="list-content"><div class="list-heading"><div><div id="list-symbol" class="list-symbol purple">${icon('list')}</div><h1 id="list-title">Your list</h1><p id="list-subtitle">One thing at a time. You’ve got this.</p></div><div class="list-controls"><button class="icon-button" data-command="list-options" aria-label="List options">${icon('more')}</button></div></div>
           <div class="progress-panel"><div><span class="progress-icon">${icon('check')}</span><span id="progress-text">A fresh start</span></div><span id="progress-count">0 of 0 done</span><progress id="progress" max="100" value="0" aria-label="List completion"></progress></div>
@@ -145,6 +149,7 @@ function shell() {
         <footer class="page-footer"><span>Together<span class="brand-period">.</span></span> Life’s a little lighter when you share the list.</footer>
       </main>
     </div></div>`;
+  window.togetherTheme.sync();
   $('#task-search').addEventListener('input', event => { search = event.target.value; renderTasks(); });
   $('#add-task').addEventListener('submit', async event => {
     event.preventDefault();
@@ -299,6 +304,7 @@ document.addEventListener('click', async event => {
   if (!button) return;
   const command = button.dataset.command;
   const id = button.dataset.id;
+  if (command === 'toggle-theme') return window.togetherTheme.toggle();
   if (command === 'close-dialog') return closeDialog();
   if (command === 'retry') return boot();
   if (command === 'auth-switch') return renderAuth(button.dataset.mode);

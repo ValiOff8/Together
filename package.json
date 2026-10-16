@@ -9,6 +9,6 @@
     "start": "node server/app.mjs",
     "dev": "node --watch server/app.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check server/app.mjs && node --check server/auth.mjs && node --check server/database.mjs && node --check web/app.js"
+    "check": "node --check server/app.mjs && node --check server/auth.mjs && node --check server/database.mjs && node --check web/app.js && node --check web/theme.js"
   }
 }

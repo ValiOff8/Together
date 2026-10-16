@@ -1,6 +1,6 @@
 # Together
 
-Simple, invite-only shared to-do lists with live updates. Built with Node.js 24 and SQLite.
+Simple, invite-only shared to-do lists with live updates and light/dark mode. Built with Node.js 24 and SQLite.
 
 ```sh
 docker compose up -d --build
