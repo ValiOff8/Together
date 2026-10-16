@@ -1,0 +1,36 @@
+# Dependencies and generated files
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local data and backups
+/data/
+/together-backup/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Secrets (keep the example configuration)
+.env*
+!.env.example
+*.pem
+*.key
+
+# Logs and temporary artifacts
+*.log
+/work/
+/outputs/
+
+# Local tooling and framework caches
+/.agents/
+/.codex/
+/.sites-runtime/
+/.wrangler/
+/.next/
+/.vinext/
+/out/
+
+# OS files
+.DS_Store
+Thumbs.db
