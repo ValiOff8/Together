@@ -24,7 +24,7 @@
   function apply() {
     const theme = valid(preference) ? preference : system.matches ? 'dark' : 'light';
     document.documentElement.dataset.theme = theme;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#19171f' : '#7561c7');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#212121' : '#7561c7');
     sync();
   }
 
