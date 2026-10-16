@@ -27,3 +27,7 @@ Source code lives in `src/server/` (Node.js and SQLite) and `src/web/` (browser 
 | Desktop · dark theme | Mobile · light theme |
 | --- | --- |
 | <img src="docs/screenshots/desktop-dark.png" alt="Shared to-do list on desktop in dark mode" width="640"> | <img src="docs/screenshots/mobile-light.png" alt="Shared to-do list on mobile in light mode" width="200"> |
+
+## License
+
+[MIT](LICENSE) · Copyright © 2026 ValiOff8.

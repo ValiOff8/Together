@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Simple, invite-only shared to-do lists. Self-host with Docker.",
+  "license": "MIT",
   "engines": { "node": ">=24" },
   "scripts": {
     "start": "node src/server/app.mjs",
