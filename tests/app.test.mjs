@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createApp } from '../server/app.mjs';
+import { createApp } from '../src/server/app.mjs';
 
 async function start(database = ':memory:', appUrl = '') {
   const app = await createApp({ database, appUrl });
@@ -154,10 +154,26 @@ test('cross-origin writes, malformed input and unsafe static paths are rejected'
   const oversized = await fetch(origin + '/api/action', { method: 'POST', headers: { Cookie: owner.cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add-list', title: 'x'.repeat(17000) }) });
   assert.equal(oversized.status, 413);
   assert.equal((await fetch(origin + '/server/app.mjs')).status, 404);
+  assert.equal((await fetch(origin + '/src/server/app.mjs')).status, 404);
   const page = await fetch(origin + '/');
   assert.equal(page.status, 200);
   assert.match(page.headers.get('content-security-policy'), /script-src 'self'/);
   assert.match(await page.text(), /lang="en"/);
+});
+
+test('browser assets are served from the application source directory', async t => {
+  const { app, origin } = await start(); t.after(() => app.close());
+  for (const [path, type] of [
+    ['/style.css', 'text/css'],
+    ['/app.js', 'text/javascript'],
+    ['/theme.js', 'text/javascript'],
+    ['/favicon.svg', 'image/svg+xml'],
+  ]) {
+    const response = await fetch(origin + path);
+    assert.equal(response.status, 200, path);
+    assert.ok(response.headers.get('content-type').startsWith(type), path);
+    assert.ok((await response.text()).length > 0, path);
+  }
 });
 
 test('password changes invalidate other sessions and secure hosting sets Secure cookies', async t => {

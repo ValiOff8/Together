@@ -3,7 +3,7 @@ import { openDatabase, transaction } from './database.mjs';
 import { passwordHash } from './auth.mjs';
 
 if (!process.stdin.isTTY || !process.argv[2]) {
-  console.error('Usage: docker compose exec -it together node server/reset-password.mjs EMAIL');
+  console.error('Usage: docker compose exec -it together node src/server/reset-password.mjs EMAIL');
   process.exit(1);
 }
 const db = openDatabase(process.env.DATABASE_PATH || './data/together.sqlite');

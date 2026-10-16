@@ -20,6 +20,8 @@ Copy `.env.example` to `.env` to customize the public `APP_URL`, `PORT`, and `BI
 
 Without Docker: run `npm start` with Node.js 24+; no dependencies to install. Checks: `npm run check` and `npm test`.
 
+Source code lives in `src/server/` (Node.js and SQLite) and `src/web/` (browser UI). Tests live in `tests/`.
+
 ## Screenshots
 
 | Desktop · dark theme | Mobile · light theme |

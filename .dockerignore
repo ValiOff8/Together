@@ -1,6 +1,7 @@
 **
 !Dockerfile
-!server/
-!server/**
-!web/
-!web/**
+!src/
+!src/server/
+!src/server/**
+!src/web/
+!src/web/**

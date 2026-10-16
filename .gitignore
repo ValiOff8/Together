@@ -23,8 +23,30 @@ coverage/
 /outputs/
 
 # Local tooling and framework caches
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+/.openai/
 /.agents/
 /.codex/
+/.claude/
+/.cursor/
+/.gemini/
+/.continue/
+/.windsurf/
+/.opencode/
+/.ai/
+/.aider*
+/.cursorrules
+/.cursorignore
+/.windsurfrules
+/.mcp.json
+/.vscode/mcp.json
+/.github/copilot-instructions.md
+/.github/instructions/
+/.sites-template/
 /.sites-runtime/
 /.wrangler/
 /.next/
