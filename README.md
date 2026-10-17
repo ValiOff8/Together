@@ -31,6 +31,10 @@ Text sheets support up to 100,000 characters each. Keep the tab open until it sa
 | --- | --- |
 | <img src="docs/screenshots/desktop-dark.png" alt="Shared to-do list on desktop in dark mode" width="640"> | <img src="docs/screenshots/mobile-light.png" alt="Shared to-do list on mobile in light mode" width="200"> |
 
+Shared text document with multiple sheets:
+
+<img src="docs/screenshots/desktop-text-dark.png" alt="Shared text document on desktop in dark mode with saved trip notes and multiple sheet tabs" width="960">
+
 ## License
 
 [MIT](LICENSE) · Copyright © 2026 ValiOff8.
