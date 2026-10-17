@@ -31,10 +31,20 @@ export function openDatabase(filename) {
       id TEXT PRIMARY KEY, email TEXT NOT NULL COLLATE NOCASE, token_hash TEXT NOT NULL UNIQUE,
       expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS text_sheets (
+      id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+      title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 0,
+      updated_by TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS text_changes (
+      sheet_id TEXT NOT NULL REFERENCES text_sheets(id) ON DELETE CASCADE,
+      version INTEGER NOT NULL, operation_id TEXT NOT NULL UNIQUE,
+      operation TEXT NOT NULL, PRIMARY KEY (sheet_id, version)
+    );
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     INSERT OR IGNORE INTO settings VALUES ('name', 'Our notebook');
     INSERT OR IGNORE INTO settings VALUES ('revision', '0');
-    PRAGMA user_version = 1;
+    PRAGMA user_version = 2;
   `);
   return db;
 }

@@ -1,3 +1,5 @@
+import { difference, applyOperation, rebaseDraft, acknowledgeDraft } from './text-operations.js';
+
 const $ = (selector, root = document) => root.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const paths = {
@@ -6,6 +8,7 @@ const paths = {
   list: '<rect x="4" y="3" width="16" height="18" rx="3"/><path d="m8 9 1 1 2-2m-3 7 1 1 2-2m3-5h3m-3 6h3"/>',
   users: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2m1-15a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/>',
   arrow: '<path d="M5 12h14m-6-6 6 6-6 6"/>',
+  download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   search: '<circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/>',
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
@@ -36,6 +39,11 @@ let toastTimer;
 let refreshSequence = 0;
 let latestApplied = 0;
 let inviteToken = new URLSearchParams(location.search).get('invite') || '';
+let selectedView = localStorage.getItem('together-view') === 'text' ? 'text' : 'tasks';
+const selectedSheets = new Map();
+const drafts = new Map();
+let draftUser = '';
+let composing = false;
 
 function toast(message, error = false) {
   const el = $('#toast');
@@ -137,13 +145,23 @@ function shell() {
     <div class="main-wrap"><header class="topbar"><div class="breadcrumbs"><button class="icon-button mobile-toggle" data-command="mobile-menu" aria-label="Open navigation">${icon('menu')}</button>${icon('list')}<span id="breadcrumb-notebook">Our notebook</span>${icon('chevron')}<strong id="breadcrumb-list">Your lists</strong></div>
       <div class="topbar-right"><span id="connection" class="connection connecting"><span></span>Connecting</span><div id="member-avatars" class="avatar-group"></div>${themeButton()}<button class="primary compact" data-command="invite">${icon('users')}<span>Invite friends</span></button></div></header>
       <main class="main-content">
-        <section id="list-content"><div class="list-heading"><div><div id="list-symbol" class="list-symbol purple">${icon('list')}</div><h1 id="list-title">Your list</h1><p id="list-subtitle">One thing at a time. You’ve got this.</p></div><div class="list-controls"><button class="icon-button" data-command="list-options" aria-label="List options">${icon('more')}</button></div></div>
-          <div class="progress-panel"><div><span class="progress-icon">${icon('check')}</span><span id="progress-text">A fresh start</span></div><span id="progress-count">0 of 0 done</span><progress id="progress" max="100" value="0" aria-label="List completion"></progress></div>
+        <section id="list-content"><div class="list-heading"><div><div class="view-switch" role="group" aria-label="List view"><button type="button" id="list-symbol" class="list-symbol purple" data-command="select-view" data-view="tasks" title="Show tasks" aria-label="Show tasks" aria-pressed="true" aria-controls="tasks-view">${icon('list')}</button><button type="button" id="text-symbol" class="list-symbol purple" data-command="select-view" data-view="text" title="Show shared text document" aria-label="Show shared text document" aria-pressed="false" aria-controls="text-view">${icon('note')}</button></div><h1 id="list-title">Your list</h1><p id="list-subtitle">One thing at a time. You’ve got this.</p></div><div class="list-controls"><button class="icon-button" data-command="list-options" aria-label="List options">${icon('more')}</button></div></div>
+          <div id="tasks-view"><div class="progress-panel"><div><span class="progress-icon">${icon('check')}</span><span id="progress-text">A fresh start</span></div><span id="progress-count">0 of 0 done</span><progress id="progress" max="100" value="0" aria-label="List completion"></progress></div>
           <div class="task-toolbar"><div class="tabs" role="group" aria-label="Filter tasks"><button class="tab active" data-command="filter" data-filter="all" aria-pressed="true">All tasks <span id="all-count">0</span></button><button class="tab" data-command="filter" data-filter="open" aria-pressed="false">To do <span id="open-count">0</span></button><button class="tab" data-command="filter" data-filter="done" aria-pressed="false">Done <span id="done-count">0</span></button></div>
             <label class="task-search">${icon('search')}<input id="task-search" aria-label="Search this list" placeholder="Search tasks…"><kbd>/</kbd></label></div>
           <form id="add-task" class="add-task"><span class="add-symbol">${icon('plus')}</span><input name="text" id="task-input" placeholder="What needs to get done?" aria-label="New task" maxlength="300" autocomplete="off" required><button type="submit" class="primary">Add task ${icon('arrow')}</button></form>
           <div id="task-list" class="task-list" aria-label="Tasks"></div>
           <div class="list-footer"><span>${icon('lock')} Just you and your invited friends.</span><button class="text-button" data-command="complete-list" id="complete-all">${icon('check')} Check off all</button></div>
+          </div>
+          <div id="text-view" class="hidden">
+            <div id="text-empty" class="empty-tasks hidden"><span class="empty-icon">${icon('note')}</span><h3>A blank page, shared with everyone.</h3><p>Keep notes, collect ideas, or write something together.</p><button class="primary" data-command="add-sheet">${icon('plus')} Create a text sheet</button></div>
+            <div id="text-document" class="text-document hidden">
+              <div class="text-toolbar"><strong id="sheet-title"></strong><span id="sheet-status" role="status" aria-live="polite"></span><button class="text-button hidden" id="retry-sheet" data-command="retry-sheet">Retry save</button><button class="icon-button" data-command="download-sheet" title="Download text" aria-label="Download text">${icon('download')}</button><button class="icon-button" id="rename-sheet" data-command="rename-sheet" title="Rename sheet" aria-label="Rename sheet">${icon('edit')}</button><button class="icon-button" id="delete-sheet" data-command="delete-sheet" title="Delete sheet" aria-label="Delete sheet">${icon('trash')}</button></div>
+              <p id="sheet-error" class="sheet-error hidden" role="alert"></p>
+              <div id="sheet-panel" role="tabpanel"><textarea id="sheet-editor" aria-label="Shared text sheet" placeholder="Start writing together…" maxlength="100000" spellcheck="true"></textarea></div>
+              <div class="sheet-bar"><div id="sheet-tabs" class="sheet-tabs" role="tablist" aria-label="Text sheets"></div><button class="icon-button add-sheet-button" data-command="add-sheet" title="Add text sheet" aria-label="Add text sheet">${icon('plus')}</button><span class="sheet-hint">Shared · saved automatically</span></div>
+            </div>
+          </div>
         </section>
         <section class="empty-notebook hidden" id="empty-notebook"><span class="empty-icon">${icon('list')}</span><h2>A little space for your plans.</h2><p>Create a list and start with one small thing.</p><button class="primary" data-command="new-list">${icon('plus')} Create your first list</button></section>
         <footer class="page-footer"><span>Together<span class="brand-period">.</span></span></footer>
@@ -151,6 +169,18 @@ function shell() {
     </div></div>`;
   window.togetherTheme.sync();
   $('#task-search').addEventListener('input', event => { search = event.target.value; renderTasks(); });
+  const editor = $('#sheet-editor');
+  editor.addEventListener('compositionstart', () => { composing = true; });
+  editor.addEventListener('compositionend', () => { composing = false; updateDraft(); reconcileDrafts(); renderSheets(); });
+  editor.addEventListener('input', updateDraft);
+  $('#sheet-tabs').addEventListener('keydown', event => {
+    const tabs = [...document.querySelectorAll('[data-command="select-sheet"]')];
+    const current = tabs.indexOf(event.target);
+    if (current < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    tabs[index].click(); document.getElementById(tabs[index].id)?.focus();
+  });
   $('#add-task').addEventListener('submit', async event => {
     event.preventDefault();
     const input = $('#task-input');
@@ -183,6 +213,11 @@ async function refresh() {
   if (sequence < latestApplied || (state && next.revision < state.revision)) return;
   latestApplied = sequence;
   state = next;
+  if (draftUser !== state.me.id) {
+    for (const draft of drafts.values()) clearTimeout(draft.timer);
+    drafts.clear(); selectedSheets.clear(); draftUser = state.me.id;
+  }
+  reconcileDrafts();
   if (!state.lists.some(list => list.id === selectedList)) selectedList = state.lists[0]?.id || '';
   render();
 }
@@ -193,6 +228,7 @@ async function act(input) {
   try {
     const result = await api('action', input);
     if (result.listId) selectedList = result.listId;
+    if (result.sheetId) selectedSheets.set(input.listId, result.sheetId);
     await refresh();
     return result;
   } catch (error) {
@@ -223,9 +259,13 @@ function render() {
   $('#list-title').textContent = list.title;
   $('#breadcrumb-list').textContent = list.title;
   $('#list-symbol').className = `list-symbol ${list.color}`;
+  $('#text-symbol').className = `list-symbol ${list.color}`;
+  for (const button of document.querySelectorAll('[data-command="select-view"]')) button.setAttribute('aria-pressed', button.dataset.view === selectedView);
+  $('#tasks-view').classList.toggle('hidden', selectedView !== 'tasks');
+  $('#text-view').classList.toggle('hidden', selectedView !== 'text');
   const tasks = state.tasks.filter(task => task.list_id === selectedList);
   const done = tasks.filter(task => task.done).length;
-  $('#list-subtitle').textContent = tasks.length && done === tasks.length ? 'All checked off. Make room for something good.' : 'One thing at a time. You’ve got this.';
+  $('#list-subtitle').textContent = selectedView === 'text' ? 'A little space to write. Everyone on the same page.' : tasks.length && done === tasks.length ? 'All checked off. Make room for something good.' : 'One thing at a time. You’ve got this.';
   $('#progress-text').textContent = done === tasks.length && tasks.length ? 'Look at you, getting things done!' : done ? 'Small steps. Real progress.' : 'Every little thing starts somewhere.';
   $('#progress-count').textContent = `${done} of ${tasks.length} done`;
   $('#progress').value = tasks.length ? (done / tasks.length) * 100 : 0;
@@ -234,6 +274,135 @@ function render() {
   $('#done-count').textContent = done;
   $('#complete-all').disabled = !tasks.some(task => !task.done);
   renderTasks();
+  renderSheets();
+}
+
+function currentDraft() { return drafts.get(selectedSheets.get(selectedList)); }
+function sheetDraft(sheet) {
+  if (!drafts.has(sheet.id)) drafts.set(sheet.id, { id: sheet.id, listId: sheet.list_id, title: sheet.title, base: sheet.content, content: sheet.content, version: sheet.version, sent: null, saving: false, error: '', timer: null });
+  return drafts.get(sheet.id);
+}
+function reconcileDrafts() {
+  for (const draft of drafts.values()) {
+    if (composing && currentDraft() === draft) continue;
+    const sheet = state.sheets.find(item => item.id === draft.id);
+    if (!sheet) {
+      if (draft.content !== draft.base || draft.sent) draft.error = 'This sheet was deleted. Download your local text to keep a copy.';
+      continue;
+    }
+    draft.title = sheet.title;
+    if (draft.saving || draft.sent || sheet.version <= draft.version) continue;
+    if (draft.content === draft.base) { draft.base = draft.content = sheet.content; draft.version = sheet.version; continue; }
+    const changes = sheet.changes.filter(change => change.version > draft.version);
+    // A long-offline draft is rebased by the server against its full history on save.
+    if (changes[0]?.version !== draft.version + 1) continue;
+    try {
+      draft.content = applyOperation(sheet.content, rebaseDraft(draft.base, draft.content, changes));
+      draft.base = sheet.content; draft.version = sheet.version;
+    } catch (error) { draft.error = error.message; }
+  }
+}
+function updateDraft() {
+  const draft = currentDraft();
+  if (!draft) return;
+  draft.content = $('#sheet-editor').value;
+  draft.error = '';
+  clearTimeout(draft.timer);
+  if (!composing) draft.timer = setTimeout(() => saveDraft(draft), 450);
+  renderSheetStatus(draft);
+}
+async function saveDraft(draft) {
+  clearTimeout(draft.timer);
+  if (draft.saving || composing || (!draft.sent && draft.content === draft.base)) return;
+  if (!state?.sheets.some(sheet => sheet.id === draft.id)) return;
+  draft.sent ||= { id: crypto.randomUUID(), operation: difference(draft.base, draft.content), content: draft.content, version: draft.version };
+  draft.saving = true; draft.error = ''; renderSheets();
+  try {
+    const { sheet } = await api('sheet', { sheetId: draft.id, version: draft.sent.version, operationId: draft.sent.id, operation: draft.sent.operation });
+    if (composing) await new Promise(resolve => $('#sheet-editor').addEventListener('compositionend', resolve, { once: true }));
+    draft.content = applyOperation(sheet.content, acknowledgeDraft(draft.sent, draft.content, sheet.changes));
+    draft.base = sheet.content; draft.version = sheet.version; draft.sent = null;
+  } catch (error) {
+    draft.error = `${error.message} Your text is kept in this tab.`;
+    if (error.status === 400) draft.sent = null;
+  }
+  finally {
+    draft.saving = false;
+    if (state) { reconcileDrafts(); renderSheets(); }
+  }
+  if (!draft.error && draft.content !== draft.base) draft.timer = setTimeout(() => saveDraft(draft), 100);
+}
+function renderSheetStatus(draft) {
+  if (currentDraft() !== draft || !$('#sheet-status')) return;
+  $('#sheet-status').textContent = draft.error ? 'Not saved' : draft.saving || draft.sent ? 'Saving…' : draft.content !== draft.base ? 'Unsaved changes' : 'All changes saved';
+  $('#retry-sheet').classList.toggle('hidden', !draft.error || !state.sheets.some(sheet => sheet.id === draft.id));
+  $('#sheet-error').textContent = draft.error;
+  $('#sheet-error').classList.toggle('hidden', !draft.error);
+}
+function mapCursor(position, operation) {
+  let source = 0, target = 0;
+  for (const part of operation) {
+    if (typeof part === 'string') target += part.length;
+    else if (part > 0) {
+      if (position < source + part) return target + Math.max(0, position - source);
+      source += part; target += part;
+    } else {
+      if (position < source - part) return target;
+      source -= part;
+    }
+  }
+  return target;
+}
+function renderSheets() {
+  if (!state || !$('#text-view') || composing) return;
+  const sheets = state.sheets.filter(sheet => sheet.list_id === selectedList);
+  let id = selectedSheets.get(selectedList);
+  const previous = drafts.get(id);
+  const orphan = previous && !sheets.some(sheet => sheet.id === id) && (previous.content !== previous.base || previous.sent);
+  if (!sheets.some(sheet => sheet.id === id) && !orphan) { id = sheets[0]?.id; selectedSheets.set(selectedList, id); }
+  const sheet = sheets.find(sheet => sheet.id === id);
+  const draft = sheet ? sheetDraft(sheet) : orphan ? previous : null;
+  $('#text-empty').classList.toggle('hidden', Boolean(draft));
+  $('#text-document').classList.toggle('hidden', !draft);
+  if (!draft) return;
+  $('#sheet-title').textContent = draft.title;
+  $('#rename-sheet').disabled = !sheet;
+  $('#delete-sheet').disabled = !sheet || draft.saving || Boolean(draft.sent);
+  const editor = $('#sheet-editor');
+  editor.setAttribute('aria-label', `Shared text sheet: ${draft.title}`);
+  $('#sheet-panel').setAttribute('aria-labelledby', `sheet-tab-${id}`);
+  if (editor.value !== draft.content || editor.dataset.sheet !== id) {
+    const sameSheet = editor.dataset.sheet === id;
+    const operation = sameSheet ? difference(editor.value, draft.content) : [];
+    const start = sameSheet ? mapCursor(editor.selectionStart, operation) : 0;
+    const end = sameSheet ? mapCursor(editor.selectionEnd, operation) : 0;
+    const scroll = sameSheet ? editor.scrollTop : 0;
+    editor.value = draft.content; editor.dataset.sheet = id;
+    editor.setSelectionRange(start, end); editor.scrollTop = scroll;
+  }
+  const visible = orphan ? [...sheets, { id, title: draft.title + ' (local copy)' }] : sheets;
+  const markup = visible.map(sheet => `<button type="button" role="tab" id="sheet-tab-${escape(sheet.id)}" aria-controls="sheet-panel" aria-selected="${sheet.id === id}" tabindex="${sheet.id === id ? 0 : -1}" class="sheet-tab" data-command="select-sheet" data-id="${escape(sheet.id)}">${icon('note')}<span>${escape(sheet.title)}</span></button>`).join('');
+  const signature = JSON.stringify(visible.map(sheet => [sheet.id, sheet.title, sheet.id === id]));
+  if ($('#sheet-tabs').dataset.signature !== signature) {
+    $('#sheet-tabs').innerHTML = markup;
+    $('#sheet-tabs').dataset.signature = signature;
+  }
+  renderSheetStatus(draft);
+}
+async function addSheet() {
+  const sheets = state.sheets.filter(sheet => sheet.list_id === selectedList);
+  let number = 1;
+  while (sheets.some(sheet => sheet.title === `Sheet ${number}`)) number++;
+  if (await act({ action: 'add-sheet', listId: selectedList, title: `Sheet ${number}` })) $('#sheet-editor').focus();
+}
+function renameSheet() {
+  const draft = currentDraft();
+  if (!draft) return;
+  modal('A name for your text sheet.', `<form id="sheet-form"><label>Sheet name<input name="title" value="${escape(draft.title)}" maxlength="80" required autofocus></label><button class="primary full" type="submit">Save name ${icon('check')}</button></form>`);
+  $('#sheet-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    if (await act({ action: 'rename-sheet', sheetId: draft.id, ...Object.fromEntries(new FormData(event.currentTarget)) })) closeDialog();
+  });
 }
 function renderTasks() {
   if (!state) return;
@@ -309,8 +478,46 @@ document.addEventListener('click', async event => {
   if (command === 'retry') return boot();
   if (command === 'auth-switch') return renderAuth(button.dataset.mode);
   if (!state) return;
+  if (command === 'select-view') {
+    if (composing) return;
+    const draft = currentDraft();
+    if (draft) saveDraft(draft);
+    selectedView = button.dataset.view;
+    localStorage.setItem('together-view', selectedView);
+    render();
+    if (selectedView === 'text' && !state.sheets.some(sheet => sheet.list_id === selectedList)) await addSheet();
+    return;
+  }
+  if (command === 'add-sheet') return addSheet();
+  if (command === 'select-sheet') {
+    if (composing) return;
+    const draft = currentDraft();
+    if (draft) saveDraft(draft);
+    selectedSheets.set(selectedList, id); renderSheets(); return;
+  }
+  if (command === 'retry-sheet') return saveDraft(currentDraft());
+  if (command === 'rename-sheet') return renameSheet();
+  if (command === 'download-sheet') {
+    const draft = currentDraft();
+    const url = URL.createObjectURL(new Blob([draft.content], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = `${draft.title.replace(/[<>:"/\\|?*]/g, '_')}.txt`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000); return;
+  }
+  if (command === 'delete-sheet') {
+    const draft = currentDraft();
+    return confirmAction('Delete this text sheet?', `“${draft.title}” and its text will be permanently deleted for everyone.`, 'Delete sheet', async () => {
+      await saveDraft(draft);
+      if (draft.error || draft.saving || draft.sent) return false;
+      const result = await act({ action: 'delete-sheet', sheetId: draft.id, version: draft.version });
+      if (result) { clearTimeout(draft.timer); drafts.delete(draft.id); renderSheets(); }
+      return result;
+    });
+  }
   if (command === 'mobile-menu') { $('.workspace').classList.toggle('nav-open'); return; }
   if (command === 'select-list') {
+    if (composing) return;
+    const draft = currentDraft();
+    if (draft) saveDraft(draft);
     selectedList = id; search = ''; filter = 'all'; $('#task-search').value = '';
     $('.workspace').classList.remove('nav-open');
     document.querySelectorAll('.tab').forEach(tab => { tab.classList.toggle('active', tab.dataset.filter === filter); tab.setAttribute('aria-pressed', tab.dataset.filter === filter); });
@@ -347,7 +554,11 @@ document.addEventListener('click', async event => {
   if (command === 'delete-list') {
     const list = state.lists.find(item => item.id === selectedList);
     const listId = selectedList;
-    return confirmAction('Delete this list?', `“${list.title}” and all of its tasks will be permanently deleted for everyone.`, 'Delete list', () => act({ action: 'delete-list', listId }));
+    return confirmAction('Delete this list?', `“${list.title}”, all of its tasks, and all text sheets will be permanently deleted for everyone.`, 'Delete list', async () => {
+      const result = await act({ action: 'delete-list', listId });
+      if (result) for (const [id, draft] of drafts) if (draft.listId === listId) { clearTimeout(draft.timer); drafts.delete(id); }
+      return result;
+    });
   }
   if (command === 'invite') return showInvite();
   if (command === 'revoke-invite') { if (await act({ action: 'revoke-invite', inviteId: id })) { showInvite(); toast('Invitation revoked.'); } return; }
@@ -363,13 +574,18 @@ document.addEventListener('click', async event => {
     return;
   }
   if (command === 'logout') {
+    await Promise.all([...drafts.values()].map(saveDraft));
+    if ([...drafts.values()].some(draft => draft.saving || draft.sent || draft.content !== draft.base)) { toast('Save or download your unsaved text before signing out.', true); return; }
     try { await api('logout', {}); closeDialog(); events?.close(); state = null; await boot(); }
     catch (error) { toast(error.message, true); }
   }
 });
 dialog.addEventListener('click', event => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeDialog(); } });
 document.addEventListener('keydown', event => {
-  if (event.key === '/' && !dialog.open && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) && $('#task-search')) { event.preventDefault(); $('#task-search').focus(); }
+  if (event.key === '/' && selectedView === 'tasks' && !dialog.open && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) && $('#task-search')) { event.preventDefault(); $('#task-search').focus(); }
+});
+window.addEventListener('beforeunload', event => {
+  if ([...drafts.values()].some(draft => draft.saving || draft.sent || draft.content !== draft.base)) { event.preventDefault(); event.returnValue = ''; }
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state) refresh().catch(handleRefreshError); });
 boot();

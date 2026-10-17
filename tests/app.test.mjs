@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/server/app.mjs';
+import { difference } from '../src/web/text-operations.js';
 
 async function start(database = ':memory:', appUrl = '') {
   const app = await createApp({ database, appUrl });
@@ -166,6 +167,7 @@ test('browser assets are served from the application source directory', async t 
   for (const [path, type] of [
     ['/style.css', 'text/css'],
     ['/app.js', 'text/javascript'],
+    ['/text-operations.js', 'text/javascript'],
     ['/theme.js', 'text/javascript'],
     ['/favicon.svg', 'image/svg+xml'],
   ]) {
@@ -199,6 +201,8 @@ test('notebook data and accounts survive a server restart', async () => {
     await owner.request('/api/setup', ownerCredentials);
     const listId = (await owner.state()).lists[0].id;
     await owner.action({ action: 'add-task', listId, text: 'Persist across restarts' });
+    const sheetId = (await owner.action({ action: 'add-sheet', listId, title: 'Persistent notes' })).data.sheetId;
+    await owner.request('/api/sheet', { sheetId, version: 0, operationId: 'persisted-save', operation: ['  Notes 📝\n\n'] });
     const savedCookie = owner.cookie;
     await running.app.close(); running = null;
     running = await start(filename);
@@ -207,8 +211,55 @@ test('notebook data and accounts survive a server restart', async () => {
     const returning = running.client();
     assert.equal((await returning.request('/api/login', ownerCredentials)).status, 200);
     assert.equal((await returning.state()).tasks[0].text, 'Persist across restarts');
+    const persistedSheet = (await returning.state()).sheets[0];
+    assert.equal(persistedSheet.content, '  Notes 📝\n\n');
+    assert.equal(persistedSheet.version, 1);
+    assert.equal(persistedSheet.changes[0].operation_id, 'persisted-save');
   } finally {
     if (running) await running.app.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('members share independent text sheets and concurrent edits merge with idempotent retries', async t => {
+  const { app, client } = await start(); t.after(() => app.close());
+  const owner = client(), friend = client(), anonymous = client();
+  await owner.request('/api/setup', ownerCredentials);
+  const invitation = await owner.action({ action: 'invite', email: memberCredentials.email });
+  const invite = new URL('http://test' + invitation.data.invitePath).searchParams.get('invite');
+  await friend.request('/api/register', { ...memberCredentials, invite });
+  const listId = (await owner.state()).lists[0].id;
+  assert.equal((await anonymous.action({ action: 'add-sheet', listId, title: 'Private' })).status, 401);
+  assert.equal((await anonymous.request('/api/sheet', {})).status, 401);
+  const sheetId = (await owner.action({ action: 'add-sheet', listId, title: 'Sheet 1' })).data.sheetId;
+  const otherId = (await friend.action({ action: 'add-sheet', listId, title: 'Sheet 2' })).data.sheetId;
+  const save = (who, id, version, operationId, before, after) => who.request('/api/sheet', { sheetId: id, version, operationId, operation: difference(before, after) });
+  await save(owner, sheetId, 0, 'initial', '', 'hello world');
+  const concurrent = await Promise.all([
+    save(owner, sheetId, 1, 'owner-edit', 'hello world', 'Hello world'),
+    save(friend, sheetId, 1, 'friend-edit', 'hello world', 'hello world!'),
+  ]);
+  assert.deepEqual(concurrent.map(result => result.status), [200, 200]);
+  let sheet = (await friend.state()).sheets.find(item => item.id === sheetId);
+  assert.equal(sheet.content, 'Hello world!');
+  assert.equal(sheet.version, 3);
+  assert.equal((await save(friend, sheetId, 1, 'friend-edit', 'hello world', 'hello world!')).status, 200);
+  assert.equal((await friend.state()).sheets.find(item => item.id === sheetId).version, 3);
+  assert.equal((await save(friend, otherId, 0, 'friend-edit', '', 'Reused identifier')).status, 409);
+  assert.equal((await owner.action({ action: 'delete-sheet', sheetId, version: 1 })).status, 409);
+  assert.equal((await friend.action({ action: 'rename-sheet', sheetId, title: 'Meeting notes' })).status, 200);
+  sheet = (await owner.state()).sheets.find(item => item.id === sheetId);
+  assert.equal(sheet.title, 'Meeting notes');
+  assert.equal(sheet.content, 'Hello world!');
+  assert.equal((await owner.state()).sheets.find(item => item.id === otherId).content, '');
+  assert.equal((await save(friend, otherId, 0, 'large-save', '', 'ä'.repeat(50000))).status, 200);
+  assert.equal((await friend.request('/api/sheet', { sheetId, version: 3, operationId: 'malformed', operation: [null] })).status, 400);
+  assert.equal((await friend.request('/api/sheet', { sheetId, version: 99, operationId: 'future', operation: [] })).status, 400);
+  assert.equal((await friend.action({ action: 'add-sheet', listId: 'missing', title: 'Sheet' })).status, 404);
+  assert.equal((await friend.action({ action: 'add-sheet', listId, title: ' ' })).status, 400);
+  assert.equal((await owner.action({ action: 'delete-sheet', sheetId, version: 3 })).status, 200);
+  assert.equal((await save(friend, sheetId, 3, 'deleted', sheet.content, 'Lost')).status, 404);
+  await owner.action({ action: 'delete-list', listId });
+  assert.equal((await friend.state()).sheets.length, 0);
+  assert.equal(app.db.prepare('SELECT count(*) AS count FROM text_changes').get().count, 0);
 });

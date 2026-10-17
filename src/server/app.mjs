@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { openDatabase, transaction } from './database.mjs';
 import { token, hash, passwordHash, checkPassword, sessionUser, sessionToken, createSession } from './auth.mjs';
+import { applyOperation, operationLengths, transformOperations } from '../web/text-operations.js';
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -20,14 +21,17 @@ function credentials(input) {
   if (typeof input.password !== 'string' || input.password.length < 10 || input.password.length > 128) fail(400, 'Use a password with 10 to 128 characters.');
   return { email, password: input.password };
 }
-async function body(request) {
+async function body(request, limit = 16000) {
   if (!request.headers['content-type']?.startsWith('application/json')) fail(415, 'Please send JSON.');
-  if (Number(request.headers['content-length']) > 16000) fail(413, 'That request is too large.');
-  let raw = '';
+  if (Number(request.headers['content-length']) > limit) fail(413, 'That request is too large.');
+  const chunks = [];
+  let size = 0;
   for await (const chunk of request) {
-    raw += chunk;
-    if (Buffer.byteLength(raw) > 16000) fail(413, 'That request is too large.');
+    size += chunk.length;
+    if (size > limit) fail(413, 'That request is too large.');
+    chunks.push(chunk);
   }
+  const raw = Buffer.concat(chunks).toString('utf8');
   let input;
   try { input = JSON.parse(raw); } catch { fail(400, 'The request could not be read.'); }
   if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'Invalid request.');
@@ -67,9 +71,13 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
       me: publicUser(user),
       lists: db.prepare('SELECT * FROM lists ORDER BY created_at, id').all(),
       tasks: db.prepare('SELECT * FROM tasks ORDER BY created_at, id').all(),
+      sheets: db.prepare('SELECT * FROM text_sheets ORDER BY created_at, id').all().map(sheet => sheetSnapshot(sheet)),
       members: db.prepare('SELECT id, name, email, role FROM users ORDER BY created_at').all().map(m => ({ ...m, online: onlineIds.has(m.id) })),
       invitations: user.role === 'owner' ? db.prepare('SELECT id, email, expires_at FROM invitations WHERE expires_at > ? ORDER BY created_at').all(Date.now()) : [],
     };
+  }
+  function sheetSnapshot(sheet, since = Math.max(0, sheet.version - 100)) {
+    return { ...sheet, changes: db.prepare('SELECT version, operation_id, operation FROM text_changes WHERE sheet_id = ? AND version > ? ORDER BY version').all(sheet.id, since).map(change => ({ ...change, operation: JSON.parse(change.operation) })) };
   }
   function list(input) {
     const id = text(input, 'listId', 100);
@@ -79,6 +87,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
   const assets = new Map([
     ['/', ['index.html', 'text/html; charset=utf-8']],
     ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+    ['/text-operations.js', ['text-operations.js', 'text/javascript; charset=utf-8']],
     ['/theme.js', ['theme.js', 'text/javascript; charset=utf-8']],
     ['/style.css', ['style.css', 'text/css; charset=utf-8']],
     ['/favicon.svg', ['favicon.svg', 'image/svg+xml']],
@@ -135,7 +144,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
       if (method !== 'POST') fail(405, 'Method not allowed.');
       const expectedOrigin = configuredOrigin || `http://${request.headers.host}`;
       if ((request.headers.origin && request.headers.origin !== expectedOrigin) || request.headers['sec-fetch-site'] === 'cross-site') fail(403, 'Please make changes from Together.');
-      const input = await body(request);
+      const input = await body(request, url.pathname === '/api/sheet' ? 1200000 : 16000);
 
       if (url.pathname === '/api/setup' || url.pathname === '/api/register') {
         const { email, password } = credentials(input);
@@ -191,8 +200,8 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
         broadcast();
         return respond({ ok: true });
       }
-      if (url.pathname !== '/api/action') fail(404, 'Not found.');
-      const action = text(input, 'action', 40);
+      if (!['/api/action', '/api/sheet'].includes(url.pathname)) fail(404, 'Not found.');
+      const action = url.pathname === '/api/sheet' ? 'update-sheet' : text(input, 'action', 40);
       let result = { ok: true };
       transaction(db, () => {
         if (action === 'add-list') {
@@ -204,6 +213,38 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
           db.prepare('UPDATE lists SET title = ? WHERE id = ?').run(text(input, 'title', 80), list(input));
         } else if (action === 'delete-list') {
           db.prepare('DELETE FROM lists WHERE id = ?').run(list(input));
+        } else if (action === 'add-sheet') {
+          const listId = list(input), id = randomUUID();
+          const title = text(input, 'title', 80);
+          db.prepare('INSERT INTO text_sheets (id,list_id,title,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(id, listId, title, user.id, Date.now(), Date.now());
+          result.sheetId = id;
+        } else if (['update-sheet', 'rename-sheet', 'delete-sheet'].includes(action)) {
+          const sheet = db.prepare('SELECT * FROM text_sheets WHERE id = ?').get(text(input, 'sheetId', 100));
+          if (!sheet) fail(404, 'This text sheet no longer exists. Your local draft has been kept.');
+          if (action === 'rename-sheet') db.prepare('UPDATE text_sheets SET title = ? WHERE id = ?').run(text(input, 'title', 80), sheet.id);
+          else if (action === 'delete-sheet') {
+            if (input.version !== sheet.version) fail(409, 'This sheet has changed. Please review it before deleting.');
+            db.prepare('DELETE FROM text_sheets WHERE id = ?').run(sheet.id);
+          } else {
+            if (!Number.isInteger(input.version) || input.version < 0 || input.version > sheet.version) fail(400, 'Invalid text version.');
+            const operationId = text(input, 'operationId', 100);
+            const existing = db.prepare('SELECT sheet_id, version FROM text_changes WHERE operation_id = ?').get(operationId);
+            if (existing && (existing.sheet_id !== sheet.id || existing.version <= input.version)) fail(409, 'Invalid save identifier.');
+            if (!existing) {
+              let operation = input.operation;
+              try {
+                operationLengths(operation);
+                for (const change of sheetSnapshot(sheet, input.version).changes) operation = transformOperations(operation, change.operation)[0];
+                const content = applyOperation(sheet.content, operation);
+                db.prepare('UPDATE text_sheets SET content=?, version=version+1, updated_by=?, updated_at=? WHERE id=?').run(content, user.id, Date.now(), sheet.id);
+                db.prepare('INSERT INTO text_changes VALUES (?,?,?,?)').run(sheet.id, sheet.version + 1, operationId, JSON.stringify(operation));
+              } catch (error) {
+                if (error instanceof HttpError) throw error;
+                fail(400, error.message);
+              }
+            }
+            result.sheet = sheetSnapshot(db.prepare('SELECT * FROM text_sheets WHERE id = ?').get(sheet.id), input.version);
+          }
         } else if (action === 'add-task') {
           const listId = list(input);
           db.prepare('INSERT INTO tasks (id,list_id,text,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(randomUUID(), listId, text(input, 'text', 300), user.id, Date.now(), Date.now());

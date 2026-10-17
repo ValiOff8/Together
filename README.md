@@ -3,6 +3,7 @@
 Private, shared to-do lists for friends and small groups. Self-hosted with Node.js 24 and SQLite.
 
 - Shared lists, task notes, search, and live updates.
+- Switch each list between tasks and a shared text document. Add, rename, and delete text sheets using the tabs at the bottom. Text saves automatically and concurrent edits are merged live.
 - Invite-only accounts with owner-managed access.
 - Responsive layout with light and dark themes.
 
@@ -21,6 +22,8 @@ Copy `.env.example` to `.env` to customize the public `APP_URL`, `PORT`, and `BI
 Without Docker: run `npm start` with Node.js 24+; no dependencies to install. Checks: `npm run check` and `npm test`.
 
 Source code lives in `src/server/` (Node.js and SQLite) and `src/web/` (browser UI). Tests live in `tests/`.
+
+Text sheets support up to 100,000 characters each. Keep the tab open until it says “All changes saved”; if saving fails, retry or download the local text using the document toolbar.
 
 ## Screenshots
 

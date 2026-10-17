@@ -8,6 +8,34 @@ dialog{border:1px solid #ece6f3;border-radius:17px;padding:30px;width:calc(100% 
 @media(max-width:400px){.task-toolbar{column-gap:10px}.task-search{max-width:none;width:100%}.task-search kbd{display:none}.tab{gap:5px}.progress-panel{padding:13px 12px}.add-task{padding-left:11px;gap:7px}.add-task>.primary>.icon{display:none}.avatar-group{display:none}.page-footer{font-size:7px}.inline-input{flex-wrap:wrap}.inline-input input{flex-basis:100%}.inline-input>button{width:100%}dialog{padding:24px}.modal-head h2{font-size:24px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 
+/* Tasks and shared text sheets use the same workspace. */
+.view-switch { display: flex; gap: 10px; margin-bottom: 18px; }
+.view-switch .list-symbol { margin: 0; border: 1px solid transparent; cursor: pointer; padding: 0; }
+.view-switch .list-symbol[aria-pressed="false"] { background: transparent; color: var(--muted); }
+.view-switch .list-symbol:hover { background: var(--soft); border-color: var(--border); }
+.view-switch .list-symbol[aria-pressed="true"] { border-color: var(--border); }
+.text-document { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface, #fff); }
+.text-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 56px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.text-toolbar strong { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; min-width: 0; flex: 1; }
+#sheet-status { font-size: 11px; color: var(--muted); }
+.sheet-error { margin: 12px 16px 0; padding: 10px 12px; background: var(--soft); border-radius: 7px; color: var(--ink); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+#sheet-editor { display: block; min-height: 320px; height: clamp(320px, 48dvh, 700px); width: 100%; padding: 26px 30px; margin: 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); font-size: 16px; line-height: 1.8; resize: vertical; box-shadow: none; tab-size: 4; }
+#sheet-editor:focus { box-shadow: inset 0 0 0 2px var(--border); }
+.sheet-bar { display: flex; align-items: center; gap: 6px; min-height: 48px; padding: 0 12px; border-top: 1px solid var(--border); background: var(--soft); }
+.sheet-tabs { display: flex; align-self: stretch; overflow-x: auto; min-width: 0; }
+.sheet-tab { display: inline-flex; flex-shrink: 0; align-items: center; gap: 7px; max-width: 220px; border: 0; border-bottom: 3px solid transparent; padding: 12px 16px 9px; background: transparent; color: var(--muted); font-size: 12px; }
+.sheet-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet-tab .icon { width: 15px; height: 15px; }
+.sheet-tab[aria-selected="true"] { background: var(--surface, #fff); color: var(--ink); border-bottom-color: var(--purple); }
+.sheet-tab:hover { color: var(--ink); }
+.add-sheet-button { flex-shrink: 0; }
+.sheet-hint { margin-left: auto; padding-left: 10px; white-space: nowrap; font-size: 10px; color: var(--muted); }
+#text-empty .primary { margin-top: 22px; }
+[data-theme="dark"] #sheet-editor { background: transparent; border: 0; box-shadow: none; }
+[data-theme="dark"] #sheet-editor:focus { box-shadow: inset 0 0 0 2px var(--border); }
+@media(max-width:760px) { .view-switch { margin-bottom: 15px; } #sheet-editor { padding: 20px 18px; } .sheet-hint { display: none; } .text-toolbar { padding: 9px 12px; gap: 5px; } .sheet-bar { padding: 0 6px; } .sheet-tab { max-width: 150px; padding-inline: 12px; } }
+@media(max-width:400px) { .text-toolbar strong { flex-basis: calc(100% - 125px); } #sheet-status { order: 1; flex-basis: 100%; } }
+
 /* Theme controls are available both before and after signing in. */
 :root { color-scheme: light; }
 .theme-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 34px; min-height: 34px; padding: 7px; border: 1px solid var(--border); border-radius: 9px; background: transparent; color: #91839f; flex-shrink: 0; }
