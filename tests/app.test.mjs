@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { createApp } from '../src/server/app.mjs';
 import { difference } from '../src/web/text-operations.js';
 
@@ -30,6 +31,146 @@ async function start(database = ':memory:', appUrl = '') {
 }
 const ownerCredentials = { name: 'Alex Owner', email: 'alex@example.com', password: 'owner password 123' };
 const memberCredentials = { name: 'Sam Friend', email: 'sam@example.com', password: 'member password 123' };
+
+async function inviteMember(owner, member, credentials = memberCredentials) {
+  const invitation = await owner.action({ action: 'invite', email: credentials.email });
+  assert.equal(invitation.status, 200);
+  const invite = new URL('http://test' + invitation.data.invitePath).searchParams.get('invite');
+  assert.equal((await member.request('/api/register', { ...credentials, invite })).status, 201);
+  return (await member.state()).me.id;
+}
+
+test('private lists enforce grants on every task and sheet mutation, including revocation', async t => {
+  const { app, client } = await start(); t.after(() => app.close());
+  const owner = client(), member = client(), other = client();
+  await owner.request('/api/setup', ownerCredentials);
+  const memberId = await inviteMember(owner, member);
+  const listId = (await owner.state()).lists[0].id;
+  await owner.action({ action: 'add-task', listId, text: 'Secret task', note: '' });
+  const task = (await owner.state()).tasks[0];
+  const sheetId = (await owner.action({ action: 'add-sheet', listId, title: 'Secret sheet' })).data.sheetId;
+  await owner.request('/api/sheet', { sheetId, version: 0, operationId: 'secret', operation: ['Secret text'] });
+  const mutations = [
+    { action: 'rename-list', listId, title: 'Renamed' },
+    { action: 'delete-list', listId },
+    { action: 'add-task', listId, text: 'New task' },
+    { action: 'update-task', taskId: task.id, version: task.version, text: 'Changed' },
+    { action: 'delete-task', taskId: task.id, version: task.version },
+    { action: 'complete-list', listId },
+    { action: 'add-sheet', listId, title: 'New sheet' },
+    { action: 'rename-sheet', sheetId, title: 'Renamed' },
+    { action: 'delete-sheet', sheetId, version: 1 },
+    { action: 'update-sheet', sheetId, version: 1, operationId: 'denied-action', operation: [11, '!'] },
+    { action: 'share-list', listId, userId: memberId, permission: 'edit' },
+  ];
+  const checkDenied = async status => {
+    for (const mutation of mutations) assert.equal((await member.action(mutation)).status, status, mutation.action);
+    assert.equal((await member.request('/api/sheet', { sheetId, version: 1, operationId: 'denied-sheet', operation: [11, '!'] })).status, status);
+    // Permissions are checked before stale versions or idempotent retries expose data.
+    assert.equal((await member.request('/api/sheet', { sheetId, version: 0, operationId: 'secret', operation: ['Secret text'] })).status, status);
+  };
+  let state = await member.state();
+  assert.deepEqual([state.lists, state.tasks, state.sheets], [[], [], []]);
+  await checkDenied(404);
+  assert.equal((await owner.action({ action: 'share-list', listId, userId: memberId, permission: 'read' })).status, 200);
+  state = await member.state();
+  assert.equal(state.lists[0].permission, 'read');
+  assert.deepEqual(state.lists[0].grants, []);
+  assert.equal(state.tasks[0].text, 'Secret task');
+  assert.equal(state.sheets[0].content, 'Secret text');
+  await checkDenied(403);
+  await owner.action({ action: 'share-list', listId, userId: memberId, permission: 'edit' });
+  assert.equal((await member.action({ action: 'rename-list', listId, title: 'Editor renamed' })).status, 200);
+  assert.equal((await member.action({ action: 'update-task', taskId: task.id, version: 1, done: true })).status, 200);
+  assert.equal((await member.request('/api/sheet', { sheetId, version: 1, operationId: 'allowed', operation: [11, '!'] })).status, 200);
+  assert.equal((await member.action({ action: 'delete-list', listId })).status, 403);
+  assert.equal((await member.action({ action: 'share-list', listId, userId: memberId, permission: 'none' })).status, 403);
+  await owner.action({ action: 'share-list', listId, userId: memberId, permission: 'read' });
+  await checkDenied(403);
+  await owner.action({ action: 'share-list', listId, userId: memberId, permission: 'none' });
+  await checkDenied(404);
+  state = await member.state();
+  assert.deepEqual([state.lists, state.tasks, state.sheets], [[], [], []]);
+  const otherId = await inviteMember(owner, other, { ...memberCredentials, email: 'other@example.com' });
+  assert.equal((await other.state()).lists.length, 0);
+  assert.equal((await owner.action({ action: 'share-list', listId, userId: otherId, permission: 'admin' })).status, 400);
+  assert.equal((await owner.action({ action: 'share-list', listId, userId: 'missing', permission: 'read' })).status, 404);
+  assert.equal((await owner.action({ action: 'share-list', listId, userId: (await owner.state()).me.id, permission: 'none' })).status, 400);
+  assert.equal((await owner.state()).tasks[0].done, 1);
+  assert.equal((await owner.state()).sheets[0].content, 'Secret text!');
+  const sharedId = (await owner.action({ action: 'add-list', title: 'Separate shared list' })).data.listId;
+  await owner.action({ action: 'share-list', listId: sharedId, userId: memberId, permission: 'edit' });
+  assert.equal((await member.action({ action: 'add-task', listId: sharedId, text: 'Allowed here' })).status, 200);
+  state = await member.state();
+  assert.deepEqual(state.lists.map(list => list.id), [sharedId]);
+  assert.deepEqual(state.tasks.map(task => task.text), ['Allowed here']);
+  assert.deepEqual(state.sheets, []);
+  await checkDenied(404);
+});
+
+test('members own private lists; notebook administration does not bypass list access', async t => {
+  const { app, client } = await start(); t.after(() => app.close());
+  const owner = client(), member = client();
+  await owner.request('/api/setup', ownerCredentials);
+  const memberId = await inviteMember(owner, member);
+  const listId = (await member.action({ action: 'add-list', title: 'Personal' })).data.listId;
+  assert.equal((await member.state()).lists[0].permission, 'owner');
+  assert.equal((await owner.state()).lists.some(list => list.id === listId), false);
+  assert.equal((await owner.action({ action: 'delete-list', listId })).status, 404);
+  const ownerId = (await owner.state()).me.id;
+  assert.equal((await owner.action({ action: 'share-list', listId, userId: ownerId, permission: 'edit' })).status, 404);
+  await member.action({ action: 'share-list', listId, userId: ownerId, permission: 'read' });
+  assert.equal((await owner.state()).lists.find(list => list.id === listId).permission, 'read');
+  assert.equal((await owner.action({ action: 'rename-list', listId, title: 'Admin edit' })).status, 403);
+  assert.equal((await owner.action({ action: 'remove-member', userId: memberId })).status, 409);
+  assert.equal((await member.action({ action: 'delete-list', listId })).status, 200);
+  await owner.action({ action: 'share-list', listId: (await owner.state()).lists[0].id, userId: memberId, permission: 'read' });
+  assert.equal(app.db.prepare('SELECT count(*) AS count FROM list_permissions').get().count, 1);
+  assert.equal((await owner.action({ action: 'remove-member', userId: memberId })).status, 200);
+  assert.equal(app.db.prepare('SELECT count(*) AS count FROM list_permissions').get().count, 0);
+  assert.equal((await member.request('/api/state')).status, 401);
+});
+
+test('legacy lists retain current collaborators once; grants and private lists survive restarts', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'together-permissions-'));
+  const filename = join(directory, 'legacy.sqlite');
+  let running;
+  try {
+    const legacy = new DatabaseSync(filename);
+    legacy.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL,
+      password_hash TEXT NOT NULL, role TEXT NOT NULL, created_at INTEGER NOT NULL);
+      CREATE TABLE lists (id TEXT PRIMARY KEY, title TEXT NOT NULL, color TEXT NOT NULL, created_at INTEGER NOT NULL);
+      INSERT INTO users VALUES ('owner', 'owner@example.com', 'Owner', '', 'owner', 1), ('member', 'member@example.com', 'Member', '', 'member', 2);
+      INSERT INTO lists VALUES ('legacy', 'Legacy list', 'purple', 1);
+      PRAGMA user_version = 2;`);
+    legacy.close();
+    running = await start(filename);
+    let db = running.app.db;
+    assert.equal(db.prepare('SELECT owner_id FROM lists').get().owner_id, 'owner');
+    assert.equal(db.prepare('SELECT permission FROM list_permissions').get().permission, 'edit');
+    const { createSession } = await import('../src/server/auth.mjs');
+    const cookie = createSession(db, 'owner', false).split(';')[0];
+    const action = async input => {
+      const response = await fetch(running.origin + '/api/action', { method: 'POST', headers: { Cookie: cookie, Origin: running.origin, 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+      assert.equal(response.status, 200); return response.json();
+    };
+    await action({ action: 'share-list', listId: 'legacy', userId: 'member', permission: 'read' });
+    const privateId = (await action({ action: 'add-list', title: 'Private after upgrade' })).listId;
+    await running.app.close(); running = null;
+    running = await start(filename); db = running.app.db;
+    assert.equal(db.prepare('SELECT permission FROM list_permissions WHERE list_id = ?').get('legacy').permission, 'read');
+    assert.equal(db.prepare('SELECT count(*) AS count FROM list_permissions WHERE list_id = ?').get(privateId).count, 0);
+    // A revoked legacy grant must not be restored by the migration on restart.
+    await action({ action: 'share-list', listId: 'legacy', userId: 'member', permission: 'none' });
+    await running.app.close(); running = null;
+    running = await start(filename);
+    assert.equal(running.app.db.prepare('SELECT count(*) AS count FROM list_permissions').get().count, 0);
+    assert.equal(running.app.db.prepare('PRAGMA user_version').get().user_version, 3);
+  } finally {
+    if (running) await running.app.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('first account is the owner; all notebook data requires authentication', async t => {
   const { app, client } = await start(); t.after(() => app.close());
@@ -94,6 +235,7 @@ test('two users edit shared lists; stale writes cannot overwrite a friend’s ch
   await friend.request('/api/register', { ...memberCredentials, invite });
   const added = await owner.action({ action: 'add-list', title: 'Weekend plans', color: 'green' });
   const listId = added.data.listId;
+  await owner.action({ action: 'share-list', listId, userId: (await friend.state()).me.id, permission: 'edit' });
   const additions = await Promise.all([
     owner.action({ action: 'add-task', listId, text: 'Book the train' }),
     friend.action({ action: 'add-task', listId, text: 'Pack snacks' }),
@@ -229,6 +371,7 @@ test('members share independent text sheets and concurrent edits merge with idem
   const invite = new URL('http://test' + invitation.data.invitePath).searchParams.get('invite');
   await friend.request('/api/register', { ...memberCredentials, invite });
   const listId = (await owner.state()).lists[0].id;
+  await owner.action({ action: 'share-list', listId, userId: (await friend.state()).me.id, permission: 'edit' });
   assert.equal((await anonymous.action({ action: 'add-sheet', listId, title: 'Private' })).status, 401);
   assert.equal((await anonymous.request('/api/sheet', {})).status, 401);
   const sheetId = (await owner.action({ action: 'add-sheet', listId, title: 'Sheet 1' })).data.sheetId;

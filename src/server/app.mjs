@@ -66,12 +66,17 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
   }
   function snapshot(user) {
     const onlineIds = new Set([...clients].map(client => client.userId));
+    const lists = db.prepare(`SELECT l.*, CASE WHEN l.owner_id = ? THEN 'owner' ELSE p.permission END AS permission
+      FROM lists l LEFT JOIN list_permissions p ON p.list_id = l.id AND p.user_id = ?
+      WHERE l.owner_id = ? OR p.user_id IS NOT NULL ORDER BY l.created_at, l.id`).all(user.id, user.id, user.id);
+    const visible = new Set(lists.map(list => list.id));
     return {
       revision: revision(), name: db.prepare("SELECT value FROM settings WHERE key = 'name'").get().value,
       me: publicUser(user),
-      lists: db.prepare('SELECT * FROM lists ORDER BY created_at, id').all(),
-      tasks: db.prepare('SELECT * FROM tasks ORDER BY created_at, id').all(),
-      sheets: db.prepare('SELECT * FROM text_sheets ORDER BY created_at, id').all().map(sheet => sheetSnapshot(sheet)),
+      lists: lists.map(list => ({ ...list, grants: list.permission === 'owner'
+        ? db.prepare('SELECT user_id, permission FROM list_permissions WHERE list_id = ? ORDER BY user_id').all(list.id) : [] })),
+      tasks: db.prepare('SELECT * FROM tasks ORDER BY created_at, id').all().filter(task => visible.has(task.list_id)),
+      sheets: db.prepare('SELECT * FROM text_sheets ORDER BY created_at, id').all().filter(sheet => visible.has(sheet.list_id)).map(sheet => sheetSnapshot(sheet)),
       members: db.prepare('SELECT id, name, email, role FROM users ORDER BY created_at').all().map(m => ({ ...m, online: onlineIds.has(m.id) })),
       invitations: user.role === 'owner' ? db.prepare('SELECT id, email, expires_at FROM invitations WHERE expires_at > ? ORDER BY created_at').all(Date.now()) : [],
     };
@@ -79,9 +84,16 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
   function sheetSnapshot(sheet, since = Math.max(0, sheet.version - 100)) {
     return { ...sheet, changes: db.prepare('SELECT version, operation_id, operation FROM text_changes WHERE sheet_id = ? AND version > ? ORDER BY version').all(sheet.id, since).map(change => ({ ...change, operation: JSON.parse(change.operation) })) };
   }
-  function list(input) {
+  function access(user, id, required = 'edit') {
+    const row = db.prepare(`SELECT l.owner_id, p.permission FROM lists l
+      LEFT JOIN list_permissions p ON p.list_id = l.id AND p.user_id = ? WHERE l.id = ?`).get(user.id, id);
+    if (!row || (row.owner_id !== user.id && !row.permission)) fail(404, 'This list is unavailable.');
+    if (row.owner_id !== user.id && (required === 'owner' || row.permission !== 'edit')) fail(403, 'You do not have permission to make this change.');
+    return id;
+  }
+  function list(user, input, required = 'edit') {
     const id = text(input, 'listId', 100);
-    if (!db.prepare('SELECT id FROM lists WHERE id = ?').get(id)) fail(404, 'This list no longer exists.');
+    access(user, id, required);
     return id;
   }
   const assets = new Map([
@@ -165,7 +177,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
           }
           if (db.prepare('SELECT id FROM users WHERE email = ?').get(email)) fail(409, 'An account with this email already exists. Please sign in.');
           db.prepare('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)').run(newId, email, name, storedHash, setup ? 'owner' : 'member', Date.now());
-          if (setup) db.prepare('INSERT INTO lists VALUES (?, ?, ?, ?)').run(randomUUID(), 'My first list', 'purple', Date.now());
+          if (setup) db.prepare('INSERT INTO lists (id,title,color,created_at,owner_id) VALUES (?, ?, ?, ?, ?)').run(randomUUID(), 'My first list', 'purple', Date.now(), newId);
           else db.prepare('DELETE FROM invitations WHERE token_hash = ?').run(hash(rawToken));
           bump();
         });
@@ -207,20 +219,30 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
         if (action === 'add-list') {
           const color = ['purple','green','orange','blue','pink'].includes(input.color) ? input.color : 'purple';
           const id = randomUUID();
-          db.prepare('INSERT INTO lists VALUES (?, ?, ?, ?)').run(id, text(input, 'title', 80), color, Date.now());
+          db.prepare('INSERT INTO lists (id,title,color,created_at,owner_id) VALUES (?, ?, ?, ?, ?)').run(id, text(input, 'title', 80), color, Date.now(), user.id);
           result.listId = id;
+        } else if (action === 'share-list') {
+          const listId = list(user, input, 'owner');
+          const userId = text(input, 'userId', 100);
+          if (userId === user.id) fail(400, 'The list owner always has full access.');
+          if (!db.prepare('SELECT id FROM users WHERE id = ?').get(userId)) fail(404, 'This member no longer exists.');
+          if (!['read', 'edit', 'none'].includes(input.permission)) fail(400, 'Choose read, edit, or none.');
+          if (input.permission === 'none') db.prepare('DELETE FROM list_permissions WHERE list_id = ? AND user_id = ?').run(listId, userId);
+          else db.prepare(`INSERT INTO list_permissions VALUES (?, ?, ?) ON CONFLICT(list_id, user_id)
+            DO UPDATE SET permission = excluded.permission`).run(listId, userId, input.permission);
         } else if (action === 'rename-list') {
-          db.prepare('UPDATE lists SET title = ? WHERE id = ?').run(text(input, 'title', 80), list(input));
+          db.prepare('UPDATE lists SET title = ? WHERE id = ?').run(text(input, 'title', 80), list(user, input));
         } else if (action === 'delete-list') {
-          db.prepare('DELETE FROM lists WHERE id = ?').run(list(input));
+          db.prepare('DELETE FROM lists WHERE id = ?').run(list(user, input, 'owner'));
         } else if (action === 'add-sheet') {
-          const listId = list(input), id = randomUUID();
+          const listId = list(user, input), id = randomUUID();
           const title = text(input, 'title', 80);
           db.prepare('INSERT INTO text_sheets (id,list_id,title,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(id, listId, title, user.id, Date.now(), Date.now());
           result.sheetId = id;
         } else if (['update-sheet', 'rename-sheet', 'delete-sheet'].includes(action)) {
           const sheet = db.prepare('SELECT * FROM text_sheets WHERE id = ?').get(text(input, 'sheetId', 100));
           if (!sheet) fail(404, 'This text sheet no longer exists. Your local draft has been kept.');
+          access(user, sheet.list_id);
           if (action === 'rename-sheet') db.prepare('UPDATE text_sheets SET title = ? WHERE id = ?').run(text(input, 'title', 80), sheet.id);
           else if (action === 'delete-sheet') {
             if (input.version !== sheet.version) fail(409, 'This sheet has changed. Please review it before deleting.');
@@ -246,12 +268,13 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
             result.sheet = sheetSnapshot(db.prepare('SELECT * FROM text_sheets WHERE id = ?').get(sheet.id), input.version);
           }
         } else if (action === 'add-task') {
-          const listId = list(input);
+          const listId = list(user, input);
           db.prepare('INSERT INTO tasks (id,list_id,text,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(randomUUID(), listId, text(input, 'text', 300), user.id, Date.now(), Date.now());
         } else if (action === 'update-task' || action === 'delete-task') {
           const taskId = text(input, 'taskId', 100);
           const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
           if (!task) fail(404, 'This task no longer exists.');
+          access(user, task.list_id);
           if (!Number.isInteger(input.version) || input.version !== task.version) fail(409, 'Your friend just changed this task. The list has been refreshed; please try again.');
           if (action === 'delete-task') db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
           else {
@@ -262,7 +285,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
             db.prepare('UPDATE tasks SET text=?, note=?, done=?, version=version+1, updated_by=?, updated_at=? WHERE id=?').run(taskText, note, done, user.id, Date.now(), taskId);
           }
         } else if (action === 'complete-list') {
-          db.prepare('UPDATE tasks SET done=1, version=version+1, updated_by=?, updated_at=? WHERE list_id=? AND done=0').run(user.id, Date.now(), list(input));
+          db.prepare('UPDATE tasks SET done=1, version=version+1, updated_by=?, updated_at=? WHERE list_id=? AND done=0').run(user.id, Date.now(), list(user, input));
         } else if (action === 'rename-notebook') {
           ownerOnly(user);
           db.prepare("UPDATE settings SET value = ? WHERE key = 'name'").run(text(input, 'title', 80));
@@ -282,6 +305,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
           ownerOnly(user);
           const id = text(input, 'userId', 100);
           if (id === user.id) fail(400, 'The owner cannot be removed.');
+          if (db.prepare('SELECT id FROM lists WHERE owner_id = ? LIMIT 1').get(id)) fail(409, 'This member owns lists. Ask them to delete their lists before removing their account.');
           db.prepare('DELETE FROM invitations WHERE email IN (SELECT email FROM users WHERE id = ?)').run(id);
           db.prepare("DELETE FROM users WHERE id = ? AND role != 'owner'").run(id);
         } else fail(400, 'Unknown action.');

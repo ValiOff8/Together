@@ -5,6 +5,7 @@ Private, shared to-do lists for friends and small groups. Self-hosted with Node.
 - Shared lists, task notes, search, and live updates.
 - Switch each list between tasks and a shared text document. Add, rename, and delete text sheets using the tabs at the bottom. Text saves automatically and concurrent edits are merged live.
 - Invite-only accounts with owner-managed access.
+- Private lists with per-person view or edit permissions, including tasks and text sheets.
 - Responsive layout with light and dark themes.
 
 ## Quick start
@@ -24,6 +25,14 @@ Without Docker: run `npm start` with Node.js 24+; no dependencies to install. Ch
 Source code lives in `src/server/` (Node.js and SQLite) and `src/web/` (browser UI). Tests live in `tests/`.
 
 Text sheets support up to 100,000 characters each. Keep the tab open until it says “All changes saved”; if saving fails, retry or download the local text using the document toolbar.
+
+## List permissions
+
+New lists are private to their creator. Invite people to the notebook, then open a list’s **List options → Manage access** to give individual members **Can view**, **Can edit**, or **No access**. Changes take effect immediately on the server and refresh in connected tabs. Viewers can read tasks and download text sheets; editors can also rename the list and change its tasks and sheets. Only the list creator can manage access or delete the whole list. The notebook owner has no automatic access to another member’s private lists.
+
+On the first upgrade, existing lists belong to the notebook owner and keep edit access for all existing members. Newly invited members receive no automatic list access. This migration runs once; subsequent restarts preserve private lists and permissions.
+
+Removing a member revokes their sessions and list grants. Members who own lists must delete those lists before their account can be removed; removing an account never silently exposes or deletes its private lists. A revoked reader’s browser clears the list on its next successful refresh, but access controls cannot retract copies someone already read or downloaded.
 
 ## Screenshots
 

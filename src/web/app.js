@@ -44,6 +44,8 @@ const selectedSheets = new Map();
 const drafts = new Map();
 let draftUser = '';
 let composing = false;
+const activeList = () => state?.lists.find(list => list.id === selectedList);
+const canEdit = (listId = selectedList) => ['owner', 'edit'].includes(state?.lists.find(list => list.id === listId)?.permission);
 
 function toast(message, error = false) {
   const el = $('#toast');
@@ -151,10 +153,10 @@ function shell() {
             <label class="task-search">${icon('search')}<input id="task-search" aria-label="Search this list" placeholder="Search tasks…"><kbd>/</kbd></label></div>
           <form id="add-task" class="add-task"><span class="add-symbol">${icon('plus')}</span><input name="text" id="task-input" placeholder="What needs to get done?" aria-label="New task" maxlength="300" autocomplete="off" required><button type="submit" class="primary">Add task ${icon('arrow')}</button></form>
           <div id="task-list" class="task-list" aria-label="Tasks"></div>
-          <div class="list-footer"><span>${icon('lock')} Just you and your invited friends.</span><button class="text-button" data-command="complete-list" id="complete-all">${icon('check')} Check off all</button></div>
+          <div class="list-footer"><span id="list-access-summary"></span><button class="text-button" data-command="complete-list" id="complete-all">${icon('check')} Check off all</button></div>
           </div>
           <div id="text-view" class="hidden">
-            <div id="text-empty" class="empty-tasks hidden"><span class="empty-icon">${icon('note')}</span><h3>A blank page, shared with everyone.</h3><p>Keep notes, collect ideas, or write something together.</p><button class="primary" data-command="add-sheet">${icon('plus')} Create a text sheet</button></div>
+            <div id="text-empty" class="empty-tasks hidden"><span class="empty-icon">${icon('note')}</span><h3>A little space for your notes.</h3><p>Text sheets use this list’s access permissions.</p><button class="primary" data-command="add-sheet">${icon('plus')} Create a text sheet</button></div>
             <div id="text-document" class="text-document hidden">
               <div class="text-toolbar"><strong id="sheet-title"></strong><span id="sheet-status" role="status" aria-live="polite"></span><button class="text-button hidden" id="retry-sheet" data-command="retry-sheet">Retry save</button><button class="icon-button" data-command="download-sheet" title="Download text" aria-label="Download text">${icon('download')}</button><button class="icon-button" id="rename-sheet" data-command="rename-sheet" title="Rename sheet" aria-label="Rename sheet">${icon('edit')}</button><button class="icon-button" id="delete-sheet" data-command="delete-sheet" title="Delete sheet" aria-label="Delete sheet">${icon('trash')}</button></div>
               <p id="sheet-error" class="sheet-error hidden" role="alert"></p>
@@ -185,7 +187,7 @@ function shell() {
     event.preventDefault();
     const input = $('#task-input');
     const taskText = input.value.trim();
-    if (!taskText || busy) return;
+    if (!taskText || busy || !canEdit()) return;
     if (await act({ action: 'add-task', listId: selectedList, text: taskText })) { input.value = ''; input.focus(); }
   });
 }
@@ -212,12 +214,22 @@ async function refresh() {
   const next = await api('state');
   if (sequence < latestApplied || (state && next.revision < state.revision)) return;
   latestApplied = sequence;
+  const previousPermission = activeList()?.permission;
   state = next;
+  if (previousPermission && previousPermission !== activeList()?.permission) { composing = false; closeDialog(); }
   if (draftUser !== state.me.id) {
     for (const draft of drafts.values()) clearTimeout(draft.timer);
     drafts.clear(); selectedSheets.clear(); draftUser = state.me.id;
   }
   reconcileDrafts();
+  for (const [id, draft] of drafts) {
+    if (!state.lists.some(list => list.id === draft.listId)) {
+      clearTimeout(draft.timer); drafts.delete(id); selectedSheets.delete(draft.listId);
+    } else if (!canEdit(draft.listId)) {
+      clearTimeout(draft.timer);
+      if (draft.content !== draft.base || draft.sent) draft.error = 'You now have read-only access. Download your local text to keep a copy.';
+    }
+  }
   if (!state.lists.some(list => list.id === selectedList)) selectedList = state.lists[0]?.id || '';
   render();
 }
@@ -253,7 +265,13 @@ function render() {
   const list = state.lists.find(item => item.id === selectedList);
   $('#list-content').classList.toggle('hidden', !list);
   $('#empty-notebook').classList.toggle('hidden', Boolean(list));
-  if (!list) { $('#breadcrumb-list').textContent = 'Your lists'; return; }
+  if (!list) {
+    $('#breadcrumb-list').textContent = 'Your lists'; document.title = 'Together';
+    $('#sheet-editor').value = ''; $('#task-list').innerHTML = ''; $('#list-title').textContent = 'Your list';
+    $('#sheet-title').textContent = ''; $('#sheet-tabs').innerHTML = '';
+    delete $('#sheet-tabs').dataset.signature;
+    return;
+  }
   localStorage.setItem('together-list', selectedList);
   document.title = `${list.title} · Together`;
   $('#list-title').textContent = list.title;
@@ -265,14 +283,17 @@ function render() {
   $('#text-view').classList.toggle('hidden', selectedView !== 'text');
   const tasks = state.tasks.filter(task => task.list_id === selectedList);
   const done = tasks.filter(task => task.done).length;
-  $('#list-subtitle').textContent = selectedView === 'text' ? 'A little space to write. Everyone on the same page.' : tasks.length && done === tasks.length ? 'All checked off. Make room for something good.' : 'One thing at a time. You’ve got this.';
+  $('#list-subtitle').textContent = !canEdit() ? 'Read-only · You can view this list and its text sheets.' : selectedView === 'text' ? 'A little space to write. Everyone on the same page.' : tasks.length && done === tasks.length ? 'All checked off. Make room for something good.' : 'One thing at a time. You’ve got this.';
+  $('#list-access-summary').textContent = list.permission === 'owner' ? (list.grants.length ? `Shared with ${list.grants.length} ${list.grants.length === 1 ? 'person' : 'people'}` : 'Private · Only you') : list.permission === 'edit' ? 'Shared with you · Can edit' : 'Shared with you · Read-only';
+  $('#add-task').classList.toggle('hidden', !canEdit());
+  for (const button of document.querySelectorAll('[data-command="add-sheet"]')) button.disabled = !canEdit();
   $('#progress-text').textContent = done === tasks.length && tasks.length ? 'Look at you, getting things done!' : done ? 'Small steps. Real progress.' : 'Every little thing starts somewhere.';
   $('#progress-count').textContent = `${done} of ${tasks.length} done`;
   $('#progress').value = tasks.length ? (done / tasks.length) * 100 : 0;
   $('#all-count').textContent = tasks.length;
   $('#open-count').textContent = tasks.length - done;
   $('#done-count').textContent = done;
-  $('#complete-all').disabled = !tasks.some(task => !task.done);
+  $('#complete-all').disabled = !canEdit() || !tasks.some(task => !task.done);
   renderTasks();
   renderSheets();
 }
@@ -304,7 +325,7 @@ function reconcileDrafts() {
 }
 function updateDraft() {
   const draft = currentDraft();
-  if (!draft) return;
+  if (!draft || !canEdit()) return;
   draft.content = $('#sheet-editor').value;
   draft.error = '';
   clearTimeout(draft.timer);
@@ -312,13 +333,16 @@ function updateDraft() {
   renderSheetStatus(draft);
 }
 async function saveDraft(draft) {
+  if (!draft) return;
   clearTimeout(draft.timer);
+  if (!canEdit(draft.listId)) return;
   if (draft.saving || composing || (!draft.sent && draft.content === draft.base)) return;
   if (!state?.sheets.some(sheet => sheet.id === draft.id)) return;
   draft.sent ||= { id: crypto.randomUUID(), operation: difference(draft.base, draft.content), content: draft.content, version: draft.version };
   draft.saving = true; draft.error = ''; renderSheets();
   try {
     const { sheet } = await api('sheet', { sheetId: draft.id, version: draft.sent.version, operationId: draft.sent.id, operation: draft.sent.operation });
+    if (drafts.get(draft.id) !== draft) return;
     if (composing) await new Promise(resolve => $('#sheet-editor').addEventListener('compositionend', resolve, { once: true }));
     draft.content = applyOperation(sheet.content, acknowledgeDraft(draft.sent, draft.content, sheet.changes));
     draft.base = sheet.content; draft.version = sheet.version; draft.sent = null;
@@ -335,7 +359,7 @@ async function saveDraft(draft) {
 function renderSheetStatus(draft) {
   if (currentDraft() !== draft || !$('#sheet-status')) return;
   $('#sheet-status').textContent = draft.error ? 'Not saved' : draft.saving || draft.sent ? 'Saving…' : draft.content !== draft.base ? 'Unsaved changes' : 'All changes saved';
-  $('#retry-sheet').classList.toggle('hidden', !draft.error || !state.sheets.some(sheet => sheet.id === draft.id));
+  $('#retry-sheet').classList.toggle('hidden', !canEdit() || !draft.error || !state.sheets.some(sheet => sheet.id === draft.id));
   $('#sheet-error').textContent = draft.error;
   $('#sheet-error').classList.toggle('hidden', !draft.error);
 }
@@ -364,11 +388,16 @@ function renderSheets() {
   const draft = sheet ? sheetDraft(sheet) : orphan ? previous : null;
   $('#text-empty').classList.toggle('hidden', Boolean(draft));
   $('#text-document').classList.toggle('hidden', !draft);
-  if (!draft) return;
+  if (!draft) {
+    $('#sheet-editor').value = ''; $('#sheet-title').textContent = ''; $('#sheet-tabs').innerHTML = '';
+    delete $('#sheet-tabs').dataset.signature;
+    return;
+  }
   $('#sheet-title').textContent = draft.title;
-  $('#rename-sheet').disabled = !sheet;
-  $('#delete-sheet').disabled = !sheet || draft.saving || Boolean(draft.sent);
+  $('#rename-sheet').disabled = !canEdit() || !sheet;
+  $('#delete-sheet').disabled = !canEdit() || !sheet || draft.saving || Boolean(draft.sent);
   const editor = $('#sheet-editor');
+  editor.readOnly = !canEdit() || !sheet;
   editor.setAttribute('aria-label', `Shared text sheet: ${draft.title}`);
   $('#sheet-panel').setAttribute('aria-labelledby', `sheet-tab-${id}`);
   if (editor.value !== draft.content || editor.dataset.sheet !== id) {
@@ -390,6 +419,7 @@ function renderSheets() {
   renderSheetStatus(draft);
 }
 async function addSheet() {
+  if (!canEdit()) return;
   const sheets = state.sheets.filter(sheet => sheet.list_id === selectedList);
   let number = 1;
   while (sheets.some(sheet => sheet.title === `Sheet ${number}`)) number++;
@@ -413,11 +443,30 @@ function renderTasks() {
     const author = state.members.find(member => member.id === task.updated_by);
     return `<article class="task-row${task.done ? ' completed' : ''}"><button class="task-checkbox" role="checkbox" aria-checked="${Boolean(task.done)}" aria-label="${escape(task.done ? 'Mark as to do: ' : 'Complete: ')}${escape(task.text)}" data-command="toggle-task" data-id="${escape(task.id)}">${task.done ? icon('check') : ''}</button><button class="task-copy" data-command="edit-task" data-id="${escape(task.id)}" aria-label="Edit ${escape(task.text)}"><span class="task-title">${escape(task.text)}</span>${task.note ? `<span class="task-note">${icon('note')}${escape(task.note)}</span>` : ''}</button><div class="task-actions">${author ? `<span class="task-author" title="Last changed by ${escape(author.name)}">${escape(initials(author.name))}</span>` : ''}<button class="icon-button" data-command="edit-task" data-id="${escape(task.id)}" aria-label="Edit task">${icon('edit')}</button></div></article>`;
   }).join('') : `<div class="empty-tasks"><span class="empty-icon">${icon(search ? 'search' : filter === 'done' ? 'check' : 'list')}</span><h3>${search ? 'No matching tasks.' : filter === 'done' ? 'Your little wins will live here.' : filter === 'open' && all.length ? 'A clean slate. Nicely done.' : 'Big plans start with a small task.'}</h3><p>${search ? 'Try a different word or clear your search.' : filter === 'done' ? 'Check off a task and watch your progress grow.' : filter === 'open' && all.length ? 'Everything on this list is checked off.' : 'Add your first task above. You can figure out the rest together.'}</p></div>`;
+  if (!canEdit()) {
+    for (const button of $('#task-list').querySelectorAll('.task-checkbox, .task-actions button')) button.disabled = true;
+    for (const button of $('#task-list').querySelectorAll('.task-copy')) button.setAttribute('aria-label', `View ${button.querySelector('.task-title').textContent}`);
+  }
+}
+
+function shareList() {
+  const list = activeList();
+  if (list?.permission !== 'owner') return;
+  modal('Who can access this list?', `<p class="modal-description"><strong>${escape(list.title)}</strong> is private until you share it. Permissions also apply to every task and text sheet. Only you can manage access or delete the list.</p>
+    <div class="member-list">${state.members.filter(member => member.id !== state.me.id).map(member => {
+      const permission = list.grants.find(grant => grant.user_id === member.id)?.permission || 'none';
+      return `<form class="member list-share-form" data-user-id="${escape(member.id)}"><span class="member-info"><strong>${escape(member.name)}</strong><small>${escape(member.email)}</small></span><label class="share-permission"><span class="sr-only">Access for ${escape(member.name)}</span><select name="permission" aria-label="Access for ${escape(member.name)}">${[['none', 'No access'], ['read', 'Can view'], ['edit', 'Can edit']].map(([value, label]) => `<option value="${value}"${permission === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label><button class="secondary" type="submit">Save</button></form>`;
+    }).join('')}</div><p class="modal-footnote">Invite people to the notebook first, then grant them access here. New members cannot see this list automatically.</p>`, true);
+  for (const form of dialog.querySelectorAll('.list-share-form')) form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const permission = new FormData(form).get('permission');
+    if (await act({ action: 'share-list', listId: list.id, userId: form.dataset.userId, permission })) { shareList(); toast('List access updated.'); }
+  });
 }
 
 function listForm(rename = false) {
   const list = state.lists.find(item => item.id === selectedList);
-  modal(rename ? 'A name for your list.' : 'What are we planning?', `<p class="modal-description">${rename ? 'Give this list a name that feels right.' : 'A weekend away, the weekly shop, or a little bit of everything.'}</p><form id="list-form"><label>List name<input name="title" placeholder="e.g. Weekend plans" maxlength="80" value="${rename ? escape(list.title) : ''}" required autofocus></label>${!rename ? '<fieldset class="color-picker"><legend>A little color</legend>' + ['purple','green','orange','blue','pink'].map((color, i) => `<label class="color-option ${color}"><input type="radio" name="color" value="${color}"${i === 0 ? ' checked' : ''}><span aria-label="${color}">✓</span></label>`).join('') + '</fieldset>' : ''}<button class="primary full" type="submit">${rename ? 'Save name' : 'Create list'} ${icon('arrow')}</button></form>`);
+  modal(rename ? 'A name for your list.' : 'What are we planning?', `<p class="modal-description">${rename ? 'Give this list a name that feels right.' : 'Your new list is private. You can share it with selected people in List options → Manage access.'}</p><form id="list-form"><label>List name<input name="title" placeholder="e.g. Weekend plans" maxlength="80" value="${rename ? escape(list.title) : ''}" required autofocus></label>${!rename ? '<fieldset class="color-picker"><legend>A little color</legend>' + ['purple','green','orange','blue','pink'].map((color, i) => `<label class="color-option ${color}"><input type="radio" name="color" value="${color}"${i === 0 ? ' checked' : ''}><span aria-label="${color}">✓</span></label>`).join('') + '</fieldset>' : ''}<button class="primary full" type="submit">${rename ? 'Save name' : 'Create list'} ${icon('arrow')}</button></form>`);
   $('#list-form').addEventListener('submit', async event => {
     event.preventDefault();
     if (await act({ action: rename ? 'rename-list' : 'add-list', listId: selectedList, ...Object.fromEntries(new FormData(event.currentTarget)) })) closeDialog();
@@ -426,6 +475,10 @@ function listForm(rename = false) {
 function editTask(id) {
   const task = state.tasks.find(item => item.id === id);
   if (!task) return;
+  if (!canEdit(task.list_id)) {
+    modal('Task details.', `<label>Task<input value="${escape(task.text)}" readonly></label><label>Notes<textarea rows="6" readonly>${escape(task.note)}</textarea></label><p class="modal-footnote">Read-only access</p>`);
+    return;
+  }
   modal('The little details.', `<form id="edit-task-form"><label>Task<input name="text" value="${escape(task.text)}" maxlength="300" required autofocus></label><label>Notes <span class="optional">optional</span><textarea name="note" rows="4" maxlength="2000" placeholder="Anything your friends should know?">${escape(task.note)}</textarea></label><div class="modal-actions"><button type="button" class="danger-quiet" data-command="delete-task" data-id="${escape(id)}">${icon('trash')} Delete task</button><button type="submit" class="primary">Save changes ${icon('check')}</button></div></form>`);
   $('#edit-task-form').addEventListener('submit', async event => {
     event.preventDefault();
@@ -439,7 +492,7 @@ function confirmAction(title, description, label, callback) {
 }
 function showInvite() {
   const owner = state.me.role === 'owner';
-  modal('Good company. Shared plans.', `<p class="modal-description">${owner ? 'Invite a friend by email address. Only that address can use their personal link to create an account.' : 'Everyone here can add, edit, and check off tasks. Ask the notebook owner to invite more friends.'}</p>
+  modal('Good company. Shared plans.', `<p class="modal-description">${owner ? 'Invite a friend by email address. Only that address can use their personal link to create an account. Then share individual lists using List options → Manage access.' : 'Each list owner decides who can view or edit their list. Ask the notebook owner to invite more friends.'}</p>
     ${owner ? '<form id="invite-form"><label>Your friend’s email<div class="inline-input"><input type="email" name="email" placeholder="friend@example.com" maxlength="254" required autofocus><button class="primary" type="submit">Create link '+icon('arrow')+'</button></div></label></form><div id="invite-result"></div>' : ''}
     <h3 class="member-heading">IN THIS NOTEBOOK <span>${state.members.length}</span></h3><div class="member-list">${state.members.map(member => `<div class="member"><span class="avatar">${escape(initials(member.name))}</span><span class="member-info"><strong>${escape(member.name)}${member.id === state.me.id ? ' <small>(you)</small>' : ''}</strong><small>${escape(member.email)}</small></span>${member.role === 'owner' ? '<span class="role-badge">Owner</span>' : owner ? `<button class="icon-button" data-command="remove-member" data-id="${escape(member.id)}" aria-label="Remove ${escape(member.name)}">${icon('close')}</button>` : '<span class="role-badge">Member</span>'}</div>`).join('')}</div>
     ${state.invitations.length ? '<h3 class="member-heading">PENDING INVITATIONS</h3><div class="member-list">' + state.invitations.map(invite => `<div class="member"><span class="small-mark">${icon('link')}</span><span class="member-info"><strong>${escape(invite.email)}</strong><small>Expires ${escape(new Date(invite.expires_at).toLocaleDateString('en', { month: 'short', day: 'numeric' }))}</small></span><button class="icon-button" data-command="revoke-invite" data-id="${escape(invite.id)}" aria-label="Revoke invitation">${icon('close')}</button></div>`).join('') + '</div>' : ''}
@@ -478,6 +531,10 @@ document.addEventListener('click', async event => {
   if (command === 'retry') return boot();
   if (command === 'auth-switch') return renderAuth(button.dataset.mode);
   if (!state) return;
+  if (button.disabled) return;
+  if (['add-sheet', 'retry-sheet', 'rename-sheet', 'delete-sheet', 'toggle-task', 'delete-task', 'complete-list', 'rename-list'].includes(command) && !canEdit()) return;
+  if (['share-list', 'delete-list'].includes(command) && activeList()?.permission !== 'owner') return;
+  if (command === 'share-list') return shareList();
   if (command === 'select-view') {
     if (composing) return;
     const draft = currentDraft();
@@ -547,7 +604,7 @@ document.addEventListener('click', async event => {
   }
   if (command === 'list-options') {
     const list = state.lists.find(item => item.id === selectedList);
-    modal('Make this list yours.', `<p class="modal-description">${escape(list.title)}</p><div class="option-list"><button data-command="rename-list">${icon('edit')} Rename list ${icon('chevron')}</button><button class="danger-quiet" data-command="delete-list">${icon('trash')} Delete list ${icon('chevron')}</button></div>`);
+    modal('Make this list yours.', `<p class="modal-description">${escape(list.title)}${list.permission === 'read' ? ' · Read-only' : ''}</p><div class="option-list">${canEdit() ? `<button data-command="rename-list">${icon('edit')} Rename list ${icon('chevron')}</button>` : ''}${list.permission === 'owner' ? `<button data-command="share-list">${icon('users')} Manage access ${icon('chevron')}</button><button class="danger-quiet" data-command="delete-list">${icon('trash')} Delete list ${icon('chevron')}</button>` : ''}</div>`);
     return;
   }
   if (command === 'rename-list') return listForm(true);
