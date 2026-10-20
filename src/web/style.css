@@ -9,7 +9,7 @@ dialog{border:1px solid #ece6f3;border-radius:17px;padding:30px;width:calc(100% 
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 
 /* Tasks and shared text sheets use the same workspace. */
-.view-switch { display: flex; gap: 10px; margin-bottom: 18px; }
+.view-switch { display: flex; gap: 6px; }
 .view-switch .list-symbol { margin: 0; border: 1px solid transparent; cursor: pointer; padding: 0; }
 .view-switch .list-symbol[aria-pressed="false"] { background: transparent; color: var(--muted); }
 .view-switch .list-symbol:hover { background: var(--soft); border-color: var(--border); }
@@ -60,8 +60,37 @@ dialog{border:1px solid #ece6f3;border-radius:17px;padding:30px;width:calc(100% 
 #text-empty .primary { margin-top: 22px; }
 [data-theme="dark"] #sheet-editor { background: transparent; border: 0; box-shadow: none; }
 [data-theme="dark"] #sheet-editor:focus { box-shadow: inset 0 0 0 2px var(--border); }
-@media(max-width:760px) { .view-switch { margin-bottom: 15px; } #sheet-editor, .markdown-preview { padding: 20px 18px; } .sheet-hint { display: none; } .text-toolbar { padding: 9px 12px; gap: 5px; } .sheet-bar { padding: 0 6px; } .sheet-tab { max-width: 150px; padding-inline: 12px; } }
+@media(max-width:760px) { #sheet-editor, .markdown-preview { padding: 20px 18px; } .sheet-hint { display: none; } .text-toolbar { padding: 9px 12px; gap: 5px; } .sheet-bar { padding: 0 6px; } .sheet-tab { max-width: 150px; padding-inline: 12px; } }
 @media(max-width:400px) { .text-toolbar strong { flex-basis: 100%; } #sheet-status { order: 1; flex-basis: 100%; } }
+
+/* Keep the workspace header compact and give documents the available canvas. */
+.topbar { padding-inline: clamp(18px, 2vw, 32px); }
+.main-content { max-width: none; padding: 24px clamp(18px, 2vw, 32px); }
+.list-heading { align-items: flex-start; gap: 24px; margin-bottom: 20px; flex-shrink: 0; }
+.list-heading-copy { min-width: 0; }
+.list-heading h1 { font-size: clamp(1.75rem, 1.25rem + 1vw, 2rem); }
+.list-heading p { margin-top: 7px; line-height: 1.5; }
+.list-controls { display: flex; align-items: center; gap: 16px; padding-top: 0; flex-shrink: 0; }
+.list-controls > .icon-button { width: 38px; height: 38px; }
+.view-switch { padding: 3px; border: 1px solid var(--border); border-radius: 11px; }
+.view-switch .list-symbol { width: 36px; height: 36px; border-radius: 8px; }
+.view-switch .list-symbol .icon { width: 20px; height: 20px; }
+.text-mode { height: calc(100dvh - 84px); min-height: 560px; }
+.text-mode #list-content, .text-mode #text-view { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.text-mode .text-document { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.text-mode .text-toolbar, .text-mode .sheet-bar { flex-shrink: 0; }
+.text-mode #sheet-panel { display: flex; flex: 1; min-height: 0; }
+.text-mode #sheet-editor, .text-mode .markdown-preview { flex: 1; min-width: 0; min-height: 0; height: auto; overflow: auto; }
+.text-mode #sheet-editor { resize: none; }
+.text-mode .sheet-error { flex-shrink: 0; max-height: 100px; overflow: auto; }
+.text-mode .page-footer { display: none; }
+@media(max-width:760px) {
+  .main-content { padding-block: 18px; }
+  .list-heading { gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .list-heading-copy { flex: 1 1 180px; }
+  .list-controls { gap: 8px; margin-left: auto; }
+  .text-mode { height: calc(100dvh - 68px); min-height: 560px; }
+}
 
 /* Theme controls are available both before and after signing in. */
 :root { color-scheme: light; }
