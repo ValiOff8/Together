@@ -92,6 +92,9 @@ dialog{border:1px solid #ece6f3;border-radius:17px;padding:30px;width:calc(100% 
   .text-mode { height: calc(100dvh - 68px); min-height: 560px; }
 }
 
+/* Keep tasks centered while sharing the document workspace header. */
+#tasks-view { width: 100%; max-width: 1160px; margin-inline: auto; }
+
 /* Theme controls are available both before and after signing in. */
 :root { color-scheme: light; }
 .theme-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 34px; min-height: 34px; padding: 7px; border: 1px solid var(--border); border-radius: 9px; background: transparent; color: #91839f; flex-shrink: 0; }
