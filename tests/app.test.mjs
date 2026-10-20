@@ -310,6 +310,9 @@ test('browser assets are served from the application source directory', async t 
     ['/style.css', 'text/css'],
     ['/app.js', 'text/javascript'],
     ['/text-operations.js', 'text/javascript'],
+    ['/markdown.js', 'text/javascript'],
+    ['/vendor/marked.js', 'text/javascript'],
+    ['/vendor/dompurify.js', 'text/javascript'],
     ['/theme.js', 'text/javascript'],
     ['/favicon.svg', 'image/svg+xml'],
   ]) {

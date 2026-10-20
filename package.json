@@ -10,6 +10,6 @@
     "start": "node src/server/app.mjs",
     "dev": "node --watch src/server/app.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check src/server/app.mjs && node --check src/server/auth.mjs && node --check src/server/database.mjs && node --check src/server/reset-password.mjs && node --check src/web/app.js && node --check src/web/text-operations.js && node --check src/web/theme.js"
+    "check": "node --check src/server/app.mjs && node --check src/server/auth.mjs && node --check src/server/database.mjs && node --check src/server/reset-password.mjs && node --check src/web/app.js && node --check src/web/text-operations.js && node --check src/web/markdown.js && node --check src/web/theme.js"
   }
 }

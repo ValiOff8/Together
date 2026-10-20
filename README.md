@@ -4,6 +4,7 @@ Private, shared to-do lists for friends and small groups. Self-hosted with Node.
 
 - Shared lists, task notes, search, and live updates.
 - Switch each list between tasks and a shared text document. Add, rename, and delete text sheets using the tabs at the bottom. Text saves automatically and concurrent edits are merged live.
+- Use **View as Markdown** in the text sheet toolbar to preview headings, lists, links, tables, and code blocks. Choose **Edit text** to return to the original text; the preview also follows live changes.
 - Invite-only accounts with owner-managed access.
 - Private lists with per-person view or edit permissions, including tasks and text sheets.
 - Responsive layout with light and dark themes.

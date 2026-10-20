@@ -1,4 +1,5 @@
 import { difference, applyOperation, rebaseDraft, acknowledgeDraft } from './text-operations.js';
+import { renderMarkdown } from './markdown.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
@@ -44,6 +45,7 @@ const selectedSheets = new Map();
 const drafts = new Map();
 let draftUser = '';
 let composing = false;
+let markdownPreview = false;
 const activeList = () => state?.lists.find(list => list.id === selectedList);
 const canEdit = (listId = selectedList) => ['owner', 'edit'].includes(state?.lists.find(list => list.id === listId)?.permission);
 
@@ -158,9 +160,9 @@ function shell() {
           <div id="text-view" class="hidden">
             <div id="text-empty" class="empty-tasks hidden"><span class="empty-icon">${icon('note')}</span><h3>A little space for your notes.</h3><p>Text sheets use this list’s access permissions.</p><button class="primary" data-command="add-sheet">${icon('plus')} Create a text sheet</button></div>
             <div id="text-document" class="text-document hidden">
-              <div class="text-toolbar"><strong id="sheet-title"></strong><span id="sheet-status" role="status" aria-live="polite"></span><button class="text-button hidden" id="retry-sheet" data-command="retry-sheet">Retry save</button><button class="icon-button" data-command="download-sheet" title="Download text" aria-label="Download text">${icon('download')}</button><button class="icon-button" id="rename-sheet" data-command="rename-sheet" title="Rename sheet" aria-label="Rename sheet">${icon('edit')}</button><button class="icon-button" id="delete-sheet" data-command="delete-sheet" title="Delete sheet" aria-label="Delete sheet">${icon('trash')}</button></div>
+              <div class="text-toolbar"><strong id="sheet-title"></strong><span id="sheet-status" role="status" aria-live="polite"></span><button class="text-button sheet-preview-toggle" id="toggle-markdown" data-command="toggle-markdown" aria-pressed="false" aria-controls="sheet-editor sheet-preview">View as Markdown</button><button class="text-button hidden" id="retry-sheet" data-command="retry-sheet">Retry save</button><button class="icon-button" data-command="download-sheet" title="Download text" aria-label="Download text">${icon('download')}</button><button class="icon-button" id="rename-sheet" data-command="rename-sheet" title="Rename sheet" aria-label="Rename sheet">${icon('edit')}</button><button class="icon-button" id="delete-sheet" data-command="delete-sheet" title="Delete sheet" aria-label="Delete sheet">${icon('trash')}</button></div>
               <p id="sheet-error" class="sheet-error hidden" role="alert"></p>
-              <div id="sheet-panel" role="tabpanel"><textarea id="sheet-editor" aria-label="Shared text sheet" placeholder="Start writing together…" maxlength="100000" spellcheck="true"></textarea></div>
+              <div id="sheet-panel" role="tabpanel"><textarea id="sheet-editor" aria-label="Shared text sheet" placeholder="Start writing together…" maxlength="100000" spellcheck="true"></textarea><div id="sheet-preview" class="markdown-preview hidden" role="region" aria-label="Markdown preview" tabindex="0"></div></div>
               <div class="sheet-bar"><div id="sheet-tabs" class="sheet-tabs" role="tablist" aria-label="Text sheets"></div><button class="icon-button add-sheet-button" data-command="add-sheet" title="Add text sheet" aria-label="Add text sheet">${icon('plus')}</button><span class="sheet-hint">Shared · saved automatically</span></div>
             </div>
           </div>
@@ -219,7 +221,7 @@ async function refresh() {
   if (previousPermission && previousPermission !== activeList()?.permission) { composing = false; closeDialog(); }
   if (draftUser !== state.me.id) {
     for (const draft of drafts.values()) clearTimeout(draft.timer);
-    drafts.clear(); selectedSheets.clear(); draftUser = state.me.id;
+    drafts.clear(); selectedSheets.clear(); markdownPreview = false; draftUser = state.me.id;
   }
   reconcileDrafts();
   for (const [id, draft] of drafts) {
@@ -269,6 +271,9 @@ function render() {
     $('#breadcrumb-list').textContent = 'Your lists'; document.title = 'Together';
     $('#sheet-editor').value = ''; $('#task-list').innerHTML = ''; $('#list-title').textContent = 'Your list';
     $('#sheet-title').textContent = ''; $('#sheet-tabs').innerHTML = '';
+    $('#sheet-preview').replaceChildren();
+    delete $('#sheet-preview').dataset.sheet;
+    delete $('#sheet-preview').markdownSource;
     delete $('#sheet-tabs').dataset.signature;
     return;
   }
@@ -390,6 +395,9 @@ function renderSheets() {
   $('#text-document').classList.toggle('hidden', !draft);
   if (!draft) {
     $('#sheet-editor').value = ''; $('#sheet-title').textContent = ''; $('#sheet-tabs').innerHTML = '';
+    $('#sheet-preview').replaceChildren();
+    delete $('#sheet-preview').dataset.sheet;
+    delete $('#sheet-preview').markdownSource;
     delete $('#sheet-tabs').dataset.signature;
     return;
   }
@@ -409,6 +417,20 @@ function renderSheets() {
     editor.value = draft.content; editor.dataset.sheet = id;
     editor.setSelectionRange(start, end); editor.scrollTop = scroll;
   }
+  const preview = $('#sheet-preview');
+  const toggle = $('#toggle-markdown');
+  editor.classList.toggle('hidden', markdownPreview);
+  preview.classList.toggle('hidden', !markdownPreview);
+  toggle.textContent = markdownPreview ? 'Edit text' : 'View as Markdown';
+  toggle.setAttribute('aria-pressed', String(markdownPreview));
+  preview.setAttribute('aria-label', `Markdown preview: ${draft.title}`);
+  if (markdownPreview && (preview.dataset.sheet !== id || preview.markdownSource !== draft.content)) {
+    const scroll = preview.dataset.sheet === id ? preview.scrollTop : 0;
+    preview.innerHTML = draft.content.trim() ? renderMarkdown(draft.content) : '<p class="markdown-empty">Nothing to preview yet. Choose Edit text to start writing.</p>';
+    preview.dataset.sheet = id;
+    preview.markdownSource = draft.content;
+    preview.scrollTop = scroll;
+  }
   const visible = orphan ? [...sheets, { id, title: draft.title + ' (local copy)' }] : sheets;
   const markup = visible.map(sheet => `<button type="button" role="tab" id="sheet-tab-${escape(sheet.id)}" aria-controls="sheet-panel" aria-selected="${sheet.id === id}" tabindex="${sheet.id === id ? 0 : -1}" class="sheet-tab" data-command="select-sheet" data-id="${escape(sheet.id)}">${icon('note')}<span>${escape(sheet.title)}</span></button>`).join('');
   const signature = JSON.stringify(visible.map(sheet => [sheet.id, sheet.title, sheet.id === id]));
@@ -420,6 +442,7 @@ function renderSheets() {
 }
 async function addSheet() {
   if (!canEdit()) return;
+  markdownPreview = false;
   const sheets = state.sheets.filter(sheet => sheet.list_id === selectedList);
   let number = 1;
   while (sheets.some(sheet => sheet.title === `Sheet ${number}`)) number++;
@@ -546,6 +569,13 @@ document.addEventListener('click', async event => {
     return;
   }
   if (command === 'add-sheet') return addSheet();
+  if (command === 'toggle-markdown') {
+    if (composing || !currentDraft()) return;
+    markdownPreview = !markdownPreview;
+    renderSheets();
+    if (!markdownPreview) $('#sheet-editor').focus({ preventScroll: true });
+    return;
+  }
   if (command === 'select-sheet') {
     if (composing) return;
     const draft = currentDraft();
