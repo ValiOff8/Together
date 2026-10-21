@@ -72,6 +72,23 @@ function modal(title, content, wide = false) {
 }
 function closeDialog() { dialog.close(); }
 
+function downloadSheet() {
+  const draft = currentDraft();
+  if (!draft) return;
+  modal('Download sheet', `<p class="modal-description">Choose a file format for “${escape(draft.title)}”.</p><div class="option-list"><button type="button" data-download-format="txt">${icon('download')} Plain text (.txt)</button><button type="button" data-download-format="md">${icon('download')} Markdown (.md)</button></div>`);
+  for (const button of dialog.querySelectorAll('[data-download-format]')) button.addEventListener('click', () => {
+    const format = button.dataset.downloadFormat;
+    const type = format === 'md' ? 'text/markdown' : 'text/plain';
+    const url = URL.createObjectURL(new Blob([draft.content], { type: `${type};charset=utf-8` }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${draft.title.replace(/[<>:"/\\|?*]/g, '_')}.${format}`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    closeDialog();
+  });
+}
+
 async function boot() {
   events?.close(); events = null;
   try {
@@ -585,12 +602,7 @@ document.addEventListener('click', async event => {
   }
   if (command === 'retry-sheet') return saveDraft(currentDraft());
   if (command === 'rename-sheet') return renameSheet();
-  if (command === 'download-sheet') {
-    const draft = currentDraft();
-    const url = URL.createObjectURL(new Blob([draft.content], { type: 'text/plain;charset=utf-8' }));
-    const link = document.createElement('a'); link.href = url; link.download = `${draft.title.replace(/[<>:"/\\|?*]/g, '_')}.txt`; link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000); return;
-  }
+  if (command === 'download-sheet') return downloadSheet();
   if (command === 'delete-sheet') {
     const draft = currentDraft();
     return confirmAction('Delete this text sheet?', `“${draft.title}” and its text will be permanently deleted for everyone.`, 'Delete sheet', async () => {
