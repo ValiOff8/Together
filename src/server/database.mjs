@@ -41,6 +41,12 @@ export function openDatabase(filename) {
       version INTEGER NOT NULL, operation_id TEXT NOT NULL UNIQUE,
       operation TEXT NOT NULL, PRIMARY KEY (sheet_id, version)
     );
+    CREATE TABLE IF NOT EXISTS shared_files (
+      id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, size INTEGER NOT NULL, uploaded_by TEXT NOT NULL,
+      created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS shared_files_expiry ON shared_files(expires_at);
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     INSERT OR IGNORE INTO settings VALUES ('name', 'Our notebook');
     INSERT OR IGNORE INTO settings VALUES ('revision', '0');
@@ -59,7 +65,7 @@ export function openDatabase(filename) {
         INSERT INTO list_permissions (list_id, user_id, permission)
         SELECT l.id, u.id, 'edit' FROM lists l CROSS JOIN users u WHERE u.id != l.owner_id;`);
     }
-    db.exec('PRAGMA user_version = 3');
+    db.exec('PRAGMA user_version = 4');
   });
   return db;
 }

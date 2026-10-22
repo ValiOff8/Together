@@ -10,6 +10,9 @@ const paths = {
   users: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2m1-15a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/>',
   arrow: '<path d="M5 12h14m-6-6 6 6-6 6"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
+  upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Zm0 0v6h6M8 13h8m-8 4h5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
   search: '<circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/>',
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
@@ -40,7 +43,9 @@ let toastTimer;
 let refreshSequence = 0;
 let latestApplied = 0;
 let inviteToken = new URLSearchParams(location.search).get('invite') || '';
-let selectedView = localStorage.getItem('together-view') === 'text' ? 'text' : 'tasks';
+let selectedView = ['text', 'files'].includes(localStorage.getItem('together-view')) ? localStorage.getItem('together-view') : 'tasks';
+let fileSearch = '';
+let uploading = null;
 const selectedSheets = new Map();
 const drafts = new Map();
 let draftUser = '';
@@ -166,7 +171,15 @@ function shell() {
     <div class="main-wrap"><header class="topbar"><div class="breadcrumbs"><button class="icon-button mobile-toggle" data-command="mobile-menu" aria-label="Open navigation">${icon('menu')}</button>${icon('list')}<span id="breadcrumb-notebook">Our notebook</span>${icon('chevron')}<strong id="breadcrumb-list">Your lists</strong></div>
       <div class="topbar-right"><span id="connection" class="connection connecting"><span></span>Connecting</span><div id="member-avatars" class="avatar-group"></div>${themeButton()}<button class="primary compact" data-command="invite">${icon('users')}<span>Invite friends</span></button></div></header>
       <main class="main-content">
-        <section id="list-content"><div class="list-heading"><div class="list-heading-copy"><h1 id="list-title">Your list</h1><p id="list-subtitle">One thing at a time. You’ve got this.</p></div><div class="list-controls"><div class="view-switch" role="group" aria-label="List view"><button type="button" id="list-symbol" class="list-symbol purple" data-command="select-view" data-view="tasks" title="Show tasks" aria-label="Show tasks" aria-pressed="true" aria-controls="tasks-view">${icon('list')}</button><button type="button" id="text-symbol" class="list-symbol purple" data-command="select-view" data-view="text" title="Show shared text document" aria-label="Show shared text document" aria-pressed="false" aria-controls="text-view">${icon('note')}</button></div><button class="icon-button" data-command="list-options" aria-label="List options" title="List options">${icon('more')}</button></div></div>
+        <section id="list-content"><div class="list-heading"><div class="list-heading-copy"><h1 id="list-title">Your list</h1><p id="list-subtitle">One thing at a time. You’ve got this.</p></div><div class="list-controls"><div class="view-switch" role="group" aria-label="List view"><button type="button" id="list-symbol" class="list-symbol purple" data-command="select-view" data-view="tasks" title="Show tasks" aria-label="Show tasks" aria-pressed="true" aria-controls="tasks-view">${icon('list')}</button><button type="button" id="text-symbol" class="list-symbol purple" data-command="select-view" data-view="text" title="Show shared text document" aria-label="Show shared text document" aria-pressed="false" aria-controls="text-view">${icon('note')}</button><button type="button" id="files-symbol" class="list-symbol purple" data-command="select-view" data-view="files" title="Show file share" aria-label="Show file share" aria-pressed="false" aria-controls="files-view">${icon('file')}</button></div><button class="icon-button" data-command="list-options" aria-label="List options" title="List options">${icon('more')}</button></div></div>
+          <div id="files-view" class="hidden">
+            <div class="file-retention"><span class="file-retention-icon">${icon('clock')}</span><div><strong>A little space to share.</strong><p>Files are automatically deleted when their timer runs out.</p></div><span class="file-retention-badge">48h by default</span></div>
+            <div id="file-dropzone" class="file-dropzone"><span class="file-upload-icon">${icon('upload')}</span><div class="file-upload-copy"><strong>Drop your files here</strong><span>or choose from your device · up to 100 MB per file</span></div><button type="button" class="primary" id="upload-files" data-command="upload-files">${icon('plus')} Upload files</button><input type="file" id="file-input" class="hidden" multiple aria-label="Choose files to upload"></div>
+            <div id="file-upload-status" class="file-upload-status hidden" role="status" aria-live="polite"><span id="file-upload-message"></span><progress id="file-upload-progress" max="100" value="0" aria-label="File upload progress"></progress></div>
+            <div class="task-toolbar file-toolbar"><div class="file-heading">Shared files <span id="file-count">0</span></div><label class="task-search">${icon('search')}<input id="file-search" aria-label="Search files" placeholder="Search files…"></label></div>
+            <div id="file-list" class="task-list" aria-label="Shared files"></div>
+            <div class="list-footer file-footer"><span id="file-access-summary"></span><span>${icon('clock')} Automatic deletion enabled</span></div>
+          </div>
           <div id="tasks-view"><div class="progress-panel"><div><span class="progress-icon">${icon('check')}</span><span id="progress-text">A fresh start</span></div><span id="progress-count">0 of 0 done</span><progress id="progress" max="100" value="0" aria-label="List completion"></progress></div>
           <div class="task-toolbar"><div class="tabs" role="group" aria-label="Filter tasks"><button class="tab active" data-command="filter" data-filter="all" aria-pressed="true">All tasks <span id="all-count">0</span></button><button class="tab" data-command="filter" data-filter="open" aria-pressed="false">To do <span id="open-count">0</span></button><button class="tab" data-command="filter" data-filter="done" aria-pressed="false">Done <span id="done-count">0</span></button></div>
             <label class="task-search">${icon('search')}<input id="task-search" aria-label="Search this list" placeholder="Search tasks…"><kbd>/</kbd></label></div>
@@ -190,6 +203,22 @@ function shell() {
     </div></div>`;
   window.togetherTheme.sync();
   $('#task-search').addEventListener('input', event => { search = event.target.value; renderTasks(); });
+  $('#file-search').addEventListener('input', event => { fileSearch = event.target.value; renderFiles(); });
+  $('#file-input').addEventListener('change', event => {
+    const files = [...event.target.files];
+    event.target.value = '';
+    uploadFiles(files);
+  });
+  const dropzone = $('#file-dropzone');
+  let dragDepth = 0;
+  for (const name of ['dragenter', 'dragover', 'dragleave', 'drop']) dropzone.addEventListener(name, event => {
+    event.preventDefault();
+    if (!canEdit() || uploading) return;
+    if (name === 'dragenter') dragDepth++;
+    if (name === 'dragleave') dragDepth = Math.max(0, dragDepth - 1);
+    if (name === 'drop') { dragDepth = 0; uploadFiles([...event.dataTransfer.files]); }
+    dropzone.classList.toggle('dragging', name !== 'drop' && dragDepth > 0);
+  });
   const editor = $('#sheet-editor');
   editor.addEventListener('compositionstart', () => { composing = true; });
   editor.addEventListener('compositionend', () => { composing = false; updateDraft(); reconcileDrafts(); renderSheets(); });
@@ -287,7 +316,7 @@ function render() {
   $('#empty-notebook').classList.toggle('hidden', Boolean(list));
   if (!list) {
     $('#breadcrumb-list').textContent = 'Your lists'; document.title = 'Together';
-    $('#sheet-editor').value = ''; $('#task-list').innerHTML = ''; $('#list-title').textContent = 'Your list';
+    $('#sheet-editor').value = ''; $('#task-list').innerHTML = ''; $('#file-list').innerHTML = ''; $('#list-title').textContent = 'Your list';
     $('#sheet-title').textContent = ''; $('#sheet-tabs').innerHTML = '';
     $('#sheet-preview').replaceChildren();
     delete $('#sheet-preview').dataset.sheet;
@@ -301,12 +330,14 @@ function render() {
   $('#breadcrumb-list').textContent = list.title;
   $('#list-symbol').className = `list-symbol ${list.color}`;
   $('#text-symbol').className = `list-symbol ${list.color}`;
+  $('#files-symbol').className = `list-symbol ${list.color}`;
   for (const button of document.querySelectorAll('[data-command="select-view"]')) button.setAttribute('aria-pressed', button.dataset.view === selectedView);
   $('#tasks-view').classList.toggle('hidden', selectedView !== 'tasks');
   $('#text-view').classList.toggle('hidden', selectedView !== 'text');
+  $('#files-view').classList.toggle('hidden', selectedView !== 'files');
   const tasks = state.tasks.filter(task => task.list_id === selectedList);
   const done = tasks.filter(task => task.done).length;
-  $('#list-subtitle').textContent = !canEdit() ? 'Read-only · You can view this list and its text sheets.' : selectedView === 'text' ? 'A little space to write. Everyone on the same page.' : tasks.length && done === tasks.length ? 'All checked off. Make room for something good.' : 'One thing at a time. You’ve got this.';
+  $('#list-subtitle').textContent = !canEdit() ? 'Read-only · View tasks, text sheets, and download shared files.' : selectedView === 'files' ? 'The files you need. Shared with your people.' : selectedView === 'text' ? 'A little space to write. Everyone on the same page.' : tasks.length && done === tasks.length ? 'All checked off. Make room for something good.' : 'One thing at a time. You’ve got this.';
   $('#list-access-summary').textContent = list.permission === 'owner' ? (list.grants.length ? `Shared with ${list.grants.length} ${list.grants.length === 1 ? 'person' : 'people'}` : 'Private · Only you') : list.permission === 'edit' ? 'Shared with you · Can edit' : 'Shared with you · Read-only';
   $('#add-task').classList.toggle('hidden', !canEdit());
   for (const button of document.querySelectorAll('[data-command="add-sheet"]')) button.disabled = !canEdit();
@@ -319,6 +350,101 @@ function render() {
   $('#complete-all').disabled = !canEdit() || !tasks.some(task => !task.done);
   renderTasks();
   renderSheets();
+  renderFiles();
+}
+
+function fileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function renderFiles() {
+  if (!state || !$('#file-list')) return;
+  const now = Date.now();
+  const all = state.files.filter(file => file.list_id === selectedList && file.expires_at > now);
+  const files = all.filter(file => file.name.toLowerCase().includes(fileSearch.toLowerCase()));
+  $('#file-count').textContent = all.length;
+  $('#file-dropzone').classList.toggle('hidden', !canEdit());
+  $('#file-access-summary').textContent = $('#list-access-summary').textContent;
+  $('#upload-files').disabled = Boolean(uploading);
+  renderUploadStatus();
+  $('#file-list').innerHTML = files.length ? files.map(file => {
+    const author = state.members.find(member => member.id === file.uploaded_by);
+    const minutes = Math.max(1, Math.ceil((file.expires_at - now) / 60000));
+    const remaining = minutes > 48 * 60 ? `${Math.ceil(minutes / (24 * 60))}d left` : minutes > 60 ? `${Math.ceil(minutes / 60)}h left` : `${minutes}m left`;
+    const href = `/api/files/${encodeURIComponent(file.id)}`;
+    return `<article class="task-row file-row"><span class="shared-file-icon">${icon('file')}</span><div class="file-copy"><a class="task-title file-name" href="${href}" download>${escape(file.name)}</a><span class="file-meta">${fileSize(file.size)}${author ? ` <span aria-hidden="true">·</span> ${escape(author.name)}` : ''}</span></div><time class="file-expiry${minutes <= 60 ? ' expiring' : ''}" datetime="${new Date(file.expires_at).toISOString()}" title="Deleted ${escape(new Date(file.expires_at).toLocaleString())}">${icon('clock')}${remaining}</time><div class="file-actions"><a class="icon-button" href="${href}" download aria-label="Download ${escape(file.name)}" title="Download file">${icon('download')}</a>${canEdit() ? `<button class="icon-button" data-command="set-file-expiry" data-id="${escape(file.id)}" aria-label="Change deletion time for ${escape(file.name)}" title="Change deletion time">${icon('clock')}</button><button class="icon-button file-delete" data-command="delete-file" data-id="${escape(file.id)}" aria-label="Delete ${escape(file.name)}" title="Delete file">${icon('trash')}</button>` : ''}</div></article>`;
+  }).join('') : `<div class="empty-tasks file-empty"><span class="empty-icon">${icon(fileSearch ? 'search' : 'file')}</span><h3>${fileSearch ? 'No matching files.' : 'Good things are better shared.'}</h3><p>${fileSearch ? 'Try a different name or clear your search.' : canEdit() ? 'Upload a file above to share it with everyone who can access this list.' : 'Files shared with this list will appear here for you to download.'}</p></div>`;
+}
+function setFileExpiry(id) {
+  const file = state.files.find(file => file.id === id);
+  if (!file || !canEdit(file.list_id)) return;
+  const minutes = Math.max(1, Math.ceil((file.expires_at - Date.now()) / 60000));
+  const initialUnit = minutes < 60 ? 1 : minutes > 48 * 60 ? 1440 : 60;
+  modal('Change deletion time', `<p class="modal-description">Choose how long <strong>${escape(file.name)}</strong> stays available, starting from now.</p><p class="modal-footnote">Currently scheduled for ${escape(new Date(file.expires_at).toLocaleString())}.</p><form id="file-expiry-form"><div class="file-expiry-fields"><label>Delete after<input id="file-expiry-amount" name="amount" type="number" min="1" max="${state.maxFileLifetimeMinutes / initialUnit}" step="1" value="${Math.ceil(minutes / initialUnit)}" required autofocus></label><label>Unit<select id="file-expiry-unit" name="unit"><option value="1"${initialUnit === 1 ? ' selected' : ''}>Minutes</option><option value="60"${initialUnit === 60 ? ' selected' : ''}>Hours</option><option value="1440"${initialUnit === 1440 ? ' selected' : ''}>Days</option></select></label></div><p class="modal-footnote">Choose between 1 minute and 30 days. The file will be deleted automatically.</p><div class="modal-actions"><button type="button" class="secondary" data-command="close-dialog">Cancel</button><button type="submit" class="primary">Save time ${icon('check')}</button></div></form>`);
+  const amount = $('#file-expiry-amount');
+  const unit = $('#file-expiry-unit');
+  unit.addEventListener('change', () => { amount.max = state.maxFileLifetimeMinutes / Number(unit.value); });
+  $('#file-expiry-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = $('button[type="submit"]', event.currentTarget);
+    button.disabled = true;
+    try {
+      if (await act({ action: 'set-file-expiry', fileId: id, minutes: Number(amount.value) * Number(unit.value) })) {
+        closeDialog();
+        toast('Deletion time updated.');
+      }
+    } finally { button.disabled = false; }
+  });
+}
+function renderUploadStatus() {
+  if (!$('#file-upload-status')) return;
+  const visible = uploading?.listId === selectedList;
+  $('#file-upload-status').classList.toggle('hidden', !visible);
+  if (!visible) return;
+  $('#file-upload-message').textContent = `Uploading ${uploading.current} of ${uploading.total}: ${uploading.name} · ${uploading.percent}%`;
+  $('#file-upload-progress').value = uploading.percent;
+}
+async function uploadFiles(files) {
+  if (!files.length || uploading || !canEdit()) return;
+  if (files.some(file => file.size > state.maxFileSize)) { toast('Files can be up to 100 MB. Please choose smaller files.', true); return; }
+  const listId = selectedList;
+  let uploaded = 0;
+  uploading = { listId, current: 0, total: files.length, name: '', percent: 0 };
+  renderFiles();
+  try {
+    for (const file of files) {
+      Object.assign(uploading, { current: uploaded + 1, name: file.name, percent: 0 });
+      renderUploadStatus();
+      await new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open('POST', `/api/files?${new URLSearchParams({ listId, name: file.name })}`);
+        request.setRequestHeader('Content-Type', 'application/octet-stream');
+        request.timeout = 300000;
+        request.upload.onprogress = event => {
+          if (event.lengthComputable) { uploading.percent = Math.round(event.loaded / event.total * 100); renderUploadStatus(); }
+        };
+        request.onload = () => {
+          let data;
+          try { data = JSON.parse(request.responseText); } catch { reject(new Error('The upload could not be completed. Please try again.')); return; }
+          if (request.status >= 200 && request.status < 300) resolve(data);
+          else reject(Object.assign(new Error(data.error || 'The upload failed.'), { status: request.status }));
+        };
+        request.onerror = () => reject(new Error('The upload failed. Check your connection and try again.'));
+        request.ontimeout = () => reject(new Error('The upload timed out. Please try again.'));
+        request.send(file);
+      });
+      uploaded++;
+    }
+    toast(`${uploaded === 1 ? 'File' : `${uploaded} files`} uploaded. Available for 48 hours.`);
+  } catch (error) {
+    toast(`${uploaded ? `${uploaded} uploaded. ` : ''}${error.message}`, true);
+    if (error.status === 401) await boot();
+  } finally {
+    uploading = null;
+    if (state) try { await refresh(); } catch (error) { handleRefreshError(error); }
+    renderFiles();
+  }
 }
 
 function currentDraft() { return drafts.get(selectedSheets.get(selectedList)); }
@@ -493,7 +619,7 @@ function renderTasks() {
 function shareList() {
   const list = activeList();
   if (list?.permission !== 'owner') return;
-  modal('Who can access this list?', `<p class="modal-description"><strong>${escape(list.title)}</strong> is private until you share it. Permissions also apply to every task and text sheet. Only you can manage access or delete the list.</p>
+  modal('Who can access this list?', `<p class="modal-description"><strong>${escape(list.title)}</strong> is private until you share it. Permissions also apply to every task, text sheet, and shared file. Only you can manage access or delete the list.</p>
     <div class="member-list">${state.members.filter(member => member.id !== state.me.id).map(member => {
       const permission = list.grants.find(grant => grant.user_id === member.id)?.permission || 'none';
       return `<form class="member list-share-form" data-user-id="${escape(member.id)}"><span class="member-info"><strong>${escape(member.name)}</strong><small>${escape(member.email)}</small></span><label class="share-permission"><span class="sr-only">Access for ${escape(member.name)}</span><select name="permission" aria-label="Access for ${escape(member.name)}">${[['none', 'No access'], ['read', 'Can view'], ['edit', 'Can edit']].map(([value, label]) => `<option value="${value}"${permission === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label><button class="secondary" type="submit">Save</button></form>`;
@@ -573,9 +699,16 @@ document.addEventListener('click', async event => {
   if (command === 'auth-switch') return renderAuth(button.dataset.mode);
   if (!state) return;
   if (button.disabled) return;
-  if (['add-sheet', 'retry-sheet', 'rename-sheet', 'delete-sheet', 'toggle-task', 'delete-task', 'complete-list', 'rename-list'].includes(command) && !canEdit()) return;
+  if (['upload-files', 'set-file-expiry', 'delete-file', 'add-sheet', 'retry-sheet', 'rename-sheet', 'delete-sheet', 'toggle-task', 'delete-task', 'complete-list', 'rename-list'].includes(command) && !canEdit()) return;
   if (['share-list', 'delete-list'].includes(command) && activeList()?.permission !== 'owner') return;
   if (command === 'share-list') return shareList();
+  if (command === 'upload-files') return $('#file-input').click();
+  if (command === 'set-file-expiry') return setFileExpiry(id);
+  if (command === 'delete-file') {
+    const file = state.files.find(file => file.id === id);
+    if (!file) return;
+    return confirmAction('Delete this file?', `“${file.name}” will be permanently deleted for everyone.`, 'Delete file', () => act({ action: 'delete-file', fileId: id }));
+  }
   if (command === 'select-view') {
     if (composing) return;
     const draft = currentDraft();
@@ -618,7 +751,7 @@ document.addEventListener('click', async event => {
     if (composing) return;
     const draft = currentDraft();
     if (draft) saveDraft(draft);
-    selectedList = id; search = ''; filter = 'all'; $('#task-search').value = '';
+    selectedList = id; search = ''; fileSearch = ''; filter = 'all'; $('#task-search').value = ''; $('#file-search').value = '';
     $('.workspace').classList.remove('nav-open');
     document.querySelectorAll('.tab').forEach(tab => { tab.classList.toggle('active', tab.dataset.filter === filter); tab.setAttribute('aria-pressed', tab.dataset.filter === filter); });
     render(); return;
@@ -654,7 +787,7 @@ document.addEventListener('click', async event => {
   if (command === 'delete-list') {
     const list = state.lists.find(item => item.id === selectedList);
     const listId = selectedList;
-    return confirmAction('Delete this list?', `“${list.title}”, all of its tasks, and all text sheets will be permanently deleted for everyone.`, 'Delete list', async () => {
+    return confirmAction('Delete this list?', `“${list.title}”, all of its tasks, text sheets, and shared files will be permanently deleted for everyone.`, 'Delete list', async () => {
       const result = await act({ action: 'delete-list', listId });
       if (result) for (const [id, draft] of drafts) if (draft.listId === listId) { clearTimeout(draft.timer); drafts.delete(id); }
       return result;
@@ -685,7 +818,8 @@ document.addEventListener('keydown', event => {
   if (event.key === '/' && selectedView === 'tasks' && !dialog.open && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) && $('#task-search')) { event.preventDefault(); $('#task-search').focus(); }
 });
 window.addEventListener('beforeunload', event => {
-  if ([...drafts.values()].some(draft => draft.saving || draft.sent || draft.content !== draft.base)) { event.preventDefault(); event.returnValue = ''; }
+  if (uploading || [...drafts.values()].some(draft => draft.saving || draft.sent || draft.content !== draft.base)) { event.preventDefault(); event.returnValue = ''; }
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state) refresh().catch(handleRefreshError); });
+setInterval(() => { if (!document.hidden && selectedView === 'files') renderFiles(); }, 30000);
 boot();

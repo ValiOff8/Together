@@ -1,6 +1,9 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, open, mkdtemp } from 'node:fs/promises';
+import { mkdirSync, readdirSync, rmSync, rmdirSync } from 'node:fs';
+import { resolve, dirname, basename, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { openDatabase, transaction } from './database.mjs';
 import { token, hash, passwordHash, checkPassword, sessionUser, sessionToken, createSession } from './auth.mjs';
@@ -11,6 +14,9 @@ class HttpError extends Error {
 }
 const fail = (status, message) => { throw new HttpError(status, message); };
 const publicUser = (user) => ({ id: user.id, email: user.email, name: user.name, role: user.role });
+export const FILE_LIFETIME = 48 * 60 * 60 * 1000;
+export const MAX_FILE_LIFETIME_MINUTES = 30 * 24 * 60;
+export const MAX_FILE_SIZE = 100 * 1024 * 1024;
 function text(input, key, max = 200) {
   if (typeof input[key] !== 'string' || !input[key].trim() || input[key].trim().length > max) fail(400, `Please enter a valid ${key} (up to ${max} characters).`);
   return input[key].trim();
@@ -40,6 +46,12 @@ async function body(request, limit = 16000) {
 
 export async function createApp({ database = process.env.DATABASE_PATH || './data/together.sqlite', appUrl = process.env.APP_URL || '' } = {}) {
   const db = openDatabase(database);
+  const uploadDirectory = database === ':memory:' ? await mkdtemp(join(tmpdir(), 'together-files-')) : join(dirname(resolve(database)), basename(database) + '-files');
+  mkdirSync(uploadDirectory, { recursive: true });
+  const activeUploads = new Set();
+  const filePath = id => join(uploadDirectory, id);
+  let expiryTimer;
+  let closing = false;
   const configuredOrigin = appUrl ? new URL(appUrl).origin : '';
   const secure = configuredOrigin.startsWith('https:');
   const clients = new Set();
@@ -55,6 +67,34 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
       else client.response.write(`event: change\ndata: ${revision()}\n\n`);
     }
   }
+  function scheduleExpiry(delay) {
+    clearTimeout(expiryTimer);
+    if (closing) return;
+    const next = db.prepare('SELECT MIN(expires_at) AS expiry FROM shared_files').get().expiry;
+    expiryTimer = setTimeout(() => {
+      try { cleanupFiles(); }
+      catch (error) { console.error('File cleanup failed:', error); scheduleExpiry(60000); }
+    }, delay ?? (next === null ? 60000 : Math.max(1, Math.min(60000, next - Date.now()))));
+    expiryTimer.unref();
+  }
+  function cleanupFiles() {
+    const expired = db.prepare('SELECT id FROM shared_files WHERE expires_at <= ?').all(Date.now());
+    for (const file of expired) rmSync(filePath(file.id), { force: true });
+    if (expired.length) {
+      transaction(db, () => {
+        for (const file of expired) db.prepare('DELETE FROM shared_files WHERE id = ?').run(file.id);
+        bump();
+      });
+      broadcast();
+    }
+    // Recover files left by interrupted uploads or a crash after deleting a list.
+    const live = new Set(db.prepare('SELECT id FROM shared_files').all().map(file => file.id));
+    for (const name of readdirSync(uploadDirectory)) {
+      if (/^[a-f0-9-]{36}(?:\.part)?$/.test(name) && !live.has(name) && !activeUploads.has(name.replace(/\.part$/, ''))) rmSync(filePath(name), { force: true });
+    }
+    scheduleExpiry();
+  }
+  cleanupFiles();
   function rateLimit(request, email = '') {
     const now = Date.now();
     for (const key of [request.socket.remoteAddress || 'unknown', 'email:' + hash(email)]) {
@@ -77,6 +117,9 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
         ? db.prepare('SELECT user_id, permission FROM list_permissions WHERE list_id = ? ORDER BY user_id').all(list.id) : [] })),
       tasks: db.prepare('SELECT * FROM tasks ORDER BY created_at, id').all().filter(task => visible.has(task.list_id)),
       sheets: db.prepare('SELECT * FROM text_sheets ORDER BY created_at, id').all().filter(sheet => visible.has(sheet.list_id)).map(sheet => sheetSnapshot(sheet)),
+      files: db.prepare('SELECT * FROM shared_files WHERE expires_at > ? ORDER BY created_at, id').all(Date.now()).filter(file => visible.has(file.list_id)),
+      maxFileSize: MAX_FILE_SIZE,
+      maxFileLifetimeMinutes: MAX_FILE_LIFETIME_MINUTES,
       members: db.prepare('SELECT id, name, email, role FROM users ORDER BY created_at').all().map(m => ({ ...m, online: onlineIds.has(m.id) })),
       invitations: user.role === 'owner' ? db.prepare('SELECT id, email, expires_at FROM invitations WHERE expires_at > ? ORDER BY created_at').all(Date.now()) : [],
     };
@@ -88,7 +131,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
     const row = db.prepare(`SELECT l.owner_id, p.permission FROM lists l
       LEFT JOIN list_permissions p ON p.list_id = l.id AND p.user_id = ? WHERE l.id = ?`).get(user.id, id);
     if (!row || (row.owner_id !== user.id && !row.permission)) fail(404, 'This list is unavailable.');
-    if (row.owner_id !== user.id && (required === 'owner' || row.permission !== 'edit')) fail(403, 'You do not have permission to make this change.');
+    if (row.owner_id !== user.id && required !== 'read' && (required === 'owner' || row.permission !== 'edit')) fail(403, 'You do not have permission to make this change.');
     return id;
   }
   function list(user, input, required = 'edit') {
@@ -144,6 +187,33 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
         if (!user) fail(401, 'Please sign in to view your lists.');
         return respond(snapshot(user));
       }
+      if (method === 'GET' && url.pathname.startsWith('/api/files/')) {
+        if (!user) fail(401, 'Please sign in to download files.');
+        const file = db.prepare('SELECT * FROM shared_files WHERE id = ?').get(url.pathname.slice('/api/files/'.length));
+        if (!file) fail(404, 'This file is no longer available.');
+        access(user, file.list_id, 'read');
+        if (file.expires_at <= Date.now()) fail(410, 'This file has expired and is no longer available.');
+        let handle;
+        try { handle = await open(filePath(file.id), 'r'); }
+        catch (error) { if (error.code === 'ENOENT') fail(404, 'This file is no longer available.'); throw error; }
+        // Access or expiry may change while the file is being opened.
+        try {
+          if (!sessionUser(db, request)) fail(401, 'Please sign in to download files.');
+          access(user, file.list_id, 'read');
+          if (file.expires_at <= Date.now() || !db.prepare('SELECT id FROM shared_files WHERE id = ?').get(file.id)) fail(410, 'This file is no longer available.');
+        } catch (error) { await handle.close(); throw error; }
+        const encodedName = encodeURIComponent(file.name).replace(/['()*]/g, char => '%' + char.charCodeAt(0).toString(16).toUpperCase());
+        response.writeHead(200, {
+          'Content-Type': 'application/octet-stream', 'Content-Length': file.size,
+          'Content-Disposition': `attachment; filename="download"; filename*=UTF-8''${encodedName}`,
+          'Cache-Control': 'no-store',
+        });
+        const stream = handle.createReadStream();
+        stream.on('error', () => response.destroy());
+        response.on('close', () => stream.destroy());
+        stream.pipe(response);
+        return;
+      }
       if (method === 'GET' && url.pathname === '/api/events') {
         if (!user) fail(401, 'Please sign in to view your lists.');
         const active = [...clients].filter(c => c.userId === user.id).length;
@@ -159,6 +229,46 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
       if (method !== 'POST') fail(405, 'Method not allowed.');
       const expectedOrigin = configuredOrigin || `http://${request.headers.host}`;
       if ((request.headers.origin && request.headers.origin !== expectedOrigin) || request.headers['sec-fetch-site'] === 'cross-site') fail(403, 'Please make changes from Together.');
+      if (url.pathname === '/api/files') {
+        if (!user) fail(401, 'Please sign in to upload files.');
+        const listId = text({ listId: url.searchParams.get('listId') }, 'listId', 100);
+        access(user, listId);
+        const name = text({ name: url.searchParams.get('name') }, 'name', 255);
+        if (/[\\/\x00-\x1f\x7f]/.test(name) || name === '.' || name === '..') fail(400, 'Please use a valid file name without folders.');
+        if (request.headers['content-type'] !== 'application/octet-stream') fail(415, 'Please send a file.');
+        if (Number(request.headers['content-length']) > MAX_FILE_SIZE) fail(413, 'Files can be up to 100 MB.');
+        const id = randomUUID();
+        let handle;
+        let stored = false;
+        activeUploads.add(id);
+        try {
+          handle = await open(filePath(id), 'wx', 0o600);
+          let size = 0;
+          for await (const chunk of request.iterator({ destroyOnReturn: false })) {
+            size += chunk.length;
+            if (size > MAX_FILE_SIZE) fail(413, 'Files can be up to 100 MB.');
+            await handle.writeFile(chunk);
+          }
+          await handle.close(); handle = null;
+          // Recheck the session and list grant after a potentially long upload.
+          if (!sessionUser(db, request)) fail(401, 'Please sign in to upload files.');
+          access(user, listId);
+          const now = Date.now();
+          transaction(db, () => {
+            db.prepare('INSERT INTO shared_files VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, listId, name, size, user.id, now, now + FILE_LIFETIME);
+            bump();
+          });
+          stored = true;
+          scheduleExpiry();
+          broadcast();
+          return respond({ ok: true, fileId: id }, 201);
+        } finally {
+          if (handle) await handle.close();
+          activeUploads.delete(id);
+          if (!stored) rmSync(filePath(id), { force: true });
+          if (!request.complete) request.resume();
+        }
+      }
       const input = await body(request, url.pathname === '/api/sheet' ? 1200000 : 16000);
 
       if (url.pathname === '/api/setup' || url.pathname === '/api/register') {
@@ -270,6 +380,20 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
             }
             result.sheet = sheetSnapshot(db.prepare('SELECT * FROM text_sheets WHERE id = ?').get(sheet.id), input.version);
           }
+        } else if (action === 'set-file-expiry') {
+          const file = db.prepare('SELECT * FROM shared_files WHERE id = ?').get(text(input, 'fileId', 100));
+          if (!file) fail(404, 'This file is no longer available.');
+          access(user, file.list_id);
+          const now = Date.now();
+          if (file.expires_at <= now) fail(410, 'This file has already expired.');
+          if (!Number.isInteger(input.minutes) || input.minutes < 1 || input.minutes > MAX_FILE_LIFETIME_MINUTES) fail(400, 'Choose a deletion time between 1 minute and 30 days.');
+          db.prepare('UPDATE shared_files SET expires_at = ? WHERE id = ?').run(now + input.minutes * 60000, file.id);
+        } else if (action === 'delete-file') {
+          const file = db.prepare('SELECT * FROM shared_files WHERE id = ?').get(text(input, 'fileId', 100));
+          if (!file) fail(404, 'This file is no longer available.');
+          access(user, file.list_id);
+          rmSync(filePath(file.id), { force: true });
+          db.prepare('DELETE FROM shared_files WHERE id = ?').run(file.id);
         } else if (action === 'add-task') {
           const listId = list(user, input);
           db.prepare('INSERT INTO tasks (id,list_id,text,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(randomUUID(), listId, text(input, 'text', 300), user.id, Date.now(), Date.now());
@@ -314,6 +438,8 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
         } else fail(400, 'Unknown action.');
         bump();
       });
+      if (action === 'delete-list') cleanupFiles();
+      if (action === 'set-file-expiry') scheduleExpiry();
       broadcast();
       return respond(result);
     } catch (error) {
@@ -330,16 +456,22 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
     }
   }, 25000);
   maintenance.unref();
-  server.requestTimeout = 30000;
+  server.requestTimeout = 300000;
   server.headersTimeout = 15000;
   return {
     server, db,
     async close() {
+      closing = true;
+      clearTimeout(expiryTimer);
       clearInterval(maintenance);
       for (const client of clients) client.response.end();
       clients.clear();
       await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
       db.close();
+      if (database === ':memory:') {
+        for (const name of readdirSync(uploadDirectory)) rmSync(filePath(name), { force: true });
+        rmdirSync(uploadDirectory);
+      }
     },
   };
 }

@@ -213,6 +213,60 @@ dialog{border:1px solid #ece6f3;border-radius:17px;padding:30px;width:calc(100% 
 @media(max-width:760px) { .auth-theme-toggle { top: 16px; right: 20px; } .auth-form-area { padding-top: 65px; } .topbar-right { gap: 8px; } }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .list-share-form { flex-wrap: wrap; }
+
+/* Temporary file sharing follows the same list layout as tasks. */
+#files-view { width: 100%; max-width: 1160px; margin-inline: auto; }
+.file-retention { display: flex; align-items: center; gap: 12px; padding: 16px 18px; margin-bottom: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--soft); }
+.file-retention-icon { display: inline-flex; flex-shrink: 0; color: var(--purple); }
+.file-retention-icon .icon { width: 22px; height: 22px; }
+.file-retention > div { flex: 1; min-width: 0; }
+.file-retention strong { font-size: 14px; font-weight: 550; }
+.file-retention p { margin-top: 5px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.file-retention-badge { flex-shrink: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--muted); }
+.file-dropzone { display: flex; align-items: center; gap: 16px; padding: 25px 22px; margin-bottom: 30px; border: 1px dashed var(--control-border, #c8bfd8); border-radius: 12px; transition: background .15s, border-color .15s; }
+.file-dropzone.dragging { background: var(--soft); border-color: var(--purple); outline: 2px solid var(--purple); outline-offset: 3px; }
+.file-upload-icon, .shared-file-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--soft); color: var(--purple); border-radius: 10px; width: 44px; height: 44px; }
+.file-upload-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 7px; }
+.file-upload-copy strong { font-size: 15px; font-weight: 550; }
+.file-upload-copy > span { font-size: 12px; line-height: 1.6; color: var(--muted); }
+.file-dropzone .primary { flex-shrink: 0; font-size: 13px; gap: 7px; }
+.file-dropzone .primary .icon { width: 16px; height: 16px; }
+.file-upload-status { padding: 0 4px 20px; margin-top: -8px; }
+#file-upload-message { display: block; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; color: var(--muted); margin-bottom: 10px; }
+.file-toolbar { margin-bottom: 0; }
+.file-heading { display: flex; align-items: center; gap: 8px; padding-bottom: 15px; font-size: 14px; font-weight: 550; }
+.file-heading > span { min-width: 23px; padding: 3px 6px; font-size: 11px; text-align: center; border-radius: 6px; background: var(--soft); color: var(--muted); }
+.file-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 6px; }
+.file-name { text-decoration: none; font-size: 15px; }
+.file-name:hover { text-decoration: underline; }
+.file-meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.file-expiry { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 6px 9px; border-radius: 7px; font-size: 11px; white-space: nowrap; background: var(--soft); color: var(--muted); }
+.file-expiry .icon { width: 13px; height: 13px; }
+.file-expiry.expiring { color: #a34a21; background: #fff0e8; }
+.file-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.file-actions .icon-button { width: 36px; height: 36px; text-decoration: none; }
+.file-actions .icon { width: 18px; height: 18px; }
+.file-delete:hover { color: #b83b40; }
+.file-expiry-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 20px; }
+.file-expiry-fields select { display: block; width: 100%; margin-top: 8px; padding: 13px 14px; font: inherit; color: var(--ink); background: var(--surface, #fff); border: 1px solid var(--control-border, #e3dfeb); border-radius: 9px; }
+.file-expiry-fields select:focus-visible { outline: 3px solid var(--purple); outline-offset: 2px; }
+.file-empty h3 { font-size: 15px; }
+.file-empty p { font-size: 12px; }
+[data-theme="dark"] .file-expiry.expiring { color: #ffb790; background: #493226; }
+@media(max-width:600px) {
+  .file-retention { padding: 14px; gap: 10px; }
+  .file-retention-badge { display: none; }
+  .file-dropzone { flex-wrap: wrap; gap: 12px; padding: 18px 14px; margin-bottom: 24px; }
+  .file-upload-copy { flex-basis: calc(100% - 60px); }
+  .file-dropzone .primary { width: 100%; justify-content: center; }
+  .file-row { flex-wrap: wrap; gap: 10px; padding-block: 16px; }
+  .shared-file-icon { width: 36px; height: 40px; }
+  .file-copy { flex-basis: calc(100% - 50px); }
+  .file-expiry { margin-left: 46px; }
+  .file-actions { margin-left: auto; }
+  .file-toolbar .task-search { width: auto; max-width: 155px; }
+  .file-footer { flex-wrap: wrap; gap: 10px; }
+}
 .list-share-form .member-info { flex-basis: 140px; }
 .share-permission select { font: inherit; color: var(--ink); background: var(--surface, #fff); border: 1px solid var(--control-border, #e3dfeb); border-radius: 8px; padding: 10px; max-width: 100%; }
 .share-permission select:focus-visible { outline: 3px solid var(--purple); outline-offset: 2px; }

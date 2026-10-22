@@ -165,7 +165,7 @@ test('legacy lists retain current collaborators once; grants and private lists s
     await running.app.close(); running = null;
     running = await start(filename);
     assert.equal(running.app.db.prepare('SELECT count(*) AS count FROM list_permissions').get().count, 0);
-    assert.equal(running.app.db.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.equal(running.app.db.prepare('PRAGMA user_version').get().user_version, 4);
   } finally {
     if (running) await running.app.close();
     await rm(directory, { recursive: true, force: true });
