@@ -72,9 +72,10 @@ dialog{border:1px solid #ece6f3;border-radius:17px;padding:30px;width:calc(100% 
 .list-heading p { margin-top: 7px; line-height: 1.5; }
 .list-controls { display: flex; align-items: center; gap: 16px; padding-top: 0; flex-shrink: 0; }
 .list-controls > .icon-button { width: 38px; height: 38px; }
-.view-switch { padding: 3px; border: 1px solid var(--border); border-radius: 11px; }
-.view-switch .list-symbol { width: 36px; height: 36px; border-radius: 8px; }
-.view-switch .list-symbol .icon { width: 20px; height: 20px; }
+.view-switch { padding: 3px; gap: 3px; border: 1px solid var(--border); border-radius: 11px; }
+.view-switch .list-symbol { width: auto; min-width: 86px; height: 42px; gap: 7px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 500; line-height: 1; white-space: nowrap; }
+.view-switch .list-symbol[aria-pressed="true"] { font-weight: 650; box-shadow: 0 1px 3px #0000000a; }
+.view-switch .list-symbol .icon { width: 19px; height: 19px; stroke-width: 1.8; }
 .text-mode { height: calc(100dvh - 84px); min-height: 560px; }
 .text-mode #list-content, .text-mode #text-view { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .text-mode .text-document { display: flex; flex: 1; flex-direction: column; min-height: 0; }
@@ -89,6 +90,8 @@ dialog{border:1px solid #ece6f3;border-radius:17px;padding:30px;width:calc(100% 
   .list-heading { gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
   .list-heading-copy { flex: 1 1 180px; }
   .list-controls { gap: 8px; margin-left: auto; }
+  .view-switch .list-symbol { min-width: 70px; gap: 6px; padding-inline: 9px; font-size: 12px; }
+  .view-switch .list-symbol .icon { width: 18px; height: 18px; }
   .text-mode { height: calc(100dvh - 68px); min-height: 560px; }
 }
 
