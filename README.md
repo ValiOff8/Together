@@ -84,7 +84,7 @@ Dragging a file over the upload area highlights the drop target:
 
 A real drag-and-drop upload in progress, with its filename, percentage, and progress bar:
 
-<img src="docs/screenshots/file-share-upload-dark.png" alt="File upload at 41 percent with a progress bar above the file list" width="960">
+<img src="docs/screenshots/file-share-upload-dark.png" alt="File upload in progress with its filename, percentage, and progress bar above the file list" width="960">
 
 The clock button opens the deletion-time dialog:
 
