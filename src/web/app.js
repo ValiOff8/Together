@@ -38,7 +38,8 @@ const app = $('#app');
 const dialog = $('#dialog');
 let state = null;
 let selectedList = localStorage.getItem('together-list') || '';
-let filter = 'all';
+const savedFilter = localStorage.getItem('together-filter');
+let filter = ['all', 'open', 'done'].includes(savedFilter) ? savedFilter : 'all';
 let search = '';
 let events = null;
 let busy = false;
@@ -46,7 +47,8 @@ let toastTimer;
 let refreshSequence = 0;
 let latestApplied = 0;
 let inviteToken = new URLSearchParams(location.search).get('invite') || '';
-let selectedView = ['text', 'files'].includes(localStorage.getItem('together-view')) ? localStorage.getItem('together-view') : 'tasks';
+const savedView = localStorage.getItem('together-view');
+let selectedView = ['tasks', 'text', 'files'].includes(savedView) ? savedView : 'tasks';
 let fileSearch = '';
 let uploading = null;
 const selectedSheets = new Map();
@@ -606,6 +608,11 @@ function renameSheet() {
 }
 function renderTasks() {
   if (!state) return;
+  document.querySelectorAll('[data-command="filter"]').forEach(tab => {
+    const active = tab.dataset.filter === filter;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-pressed', active);
+  });
   const all = state.tasks.filter(task => task.list_id === selectedList);
   const tasks = all.filter(task => (filter === 'all' || (filter === 'done' ? task.done : !task.done)) && `${task.text} ${task.note}`.toLowerCase().includes(search.toLowerCase()));
   tasks.sort((a, b) => a.done - b.done);
@@ -754,14 +761,13 @@ document.addEventListener('click', async event => {
     if (composing) return;
     const draft = currentDraft();
     if (draft) saveDraft(draft);
-    selectedList = id; search = ''; fileSearch = ''; filter = 'all'; $('#task-search').value = ''; $('#file-search').value = '';
+    selectedList = id; search = ''; fileSearch = ''; $('#task-search').value = ''; $('#file-search').value = '';
     $('.workspace').classList.remove('nav-open');
-    document.querySelectorAll('.tab').forEach(tab => { tab.classList.toggle('active', tab.dataset.filter === filter); tab.setAttribute('aria-pressed', tab.dataset.filter === filter); });
     render(); return;
   }
   if (command === 'filter') {
     filter = button.dataset.filter;
-    document.querySelectorAll('.tab').forEach(tab => { tab.classList.toggle('active', tab === button); tab.setAttribute('aria-pressed', tab === button); });
+    localStorage.setItem('together-filter', filter);
     renderTasks(); return;
   }
   if (command === 'new-list') return listForm();

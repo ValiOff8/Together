@@ -3,6 +3,7 @@
 Private, shared to-do lists, text documents, and temporary file sharing for friends and small groups. Self-hosted with Node.js 24 and SQLite.
 
 - Shared lists, task notes, search, and live updates.
+- Your browser remembers the last selected view (To-do, Text, or Files) and task filter (All tasks, To do, or Done), including after reopening the app or switching lists.
 - Switch each list between tasks and a shared text document. Add, rename, and delete text sheets using the tabs at the bottom. Text saves automatically and concurrent edits are merged live.
 - Use **View as Markdown** in the text sheet toolbar to preview headings, lists, links, tables, and code blocks. Choose **Edit text** to return to the original text; the preview also follows live changes.
 - Download a text sheet as **Plain text (.txt)** or **Markdown (.md)** using the download button in its toolbar. Both formats include the current text, including unsaved changes.
