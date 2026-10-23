@@ -57,6 +57,7 @@ test('private lists enforce grants on every task and sheet mutation, including r
     { action: 'update-task', taskId: task.id, version: task.version, text: 'Changed' },
     { action: 'delete-task', taskId: task.id, version: task.version },
     { action: 'complete-list', listId },
+    { action: 'delete-completed-tasks', listId },
     { action: 'add-sheet', listId, title: 'New sheet' },
     { action: 'rename-sheet', sheetId, title: 'Renamed' },
     { action: 'delete-sheet', sheetId, version: 1 },
@@ -262,6 +263,38 @@ test('two users edit shared lists; stale writes cannot overwrite a friend’s ch
   await owner.action({ action: 'delete-list', listId });
   assert.equal((await friend.state()).tasks.length, 0);
   assert.equal((await friend.action({ action: 'add-task', listId, text: 'Too late' })).status, 404);
+});
+
+test('owners and editors can bulk delete completed tasks only in the selected list', async t => {
+  const { app, client } = await start(); t.after(() => app.close());
+  const owner = client(), member = client();
+  await owner.request('/api/setup', ownerCredentials);
+  const memberId = await inviteMember(owner, member);
+  const listId = (await owner.state()).lists[0].id;
+  const otherListId = (await owner.action({ action: 'add-list', title: 'Other list' })).data.listId;
+  for (const targetListId of [listId, otherListId]) {
+    await owner.action({ action: 'add-task', listId: targetListId, text: 'Completed task' });
+    await owner.action({ action: 'complete-list', listId: targetListId });
+    await owner.action({ action: 'add-task', listId: targetListId, text: 'Open task' });
+  }
+  // A task reopened before deletion must be preserved, too.
+  await owner.action({ action: 'add-task', listId, text: 'Reopened task' });
+  const reopened = (await owner.state()).tasks.find(task => task.text === 'Reopened task');
+  await owner.action({ action: 'update-task', taskId: reopened.id, version: reopened.version, done: true });
+  await owner.action({ action: 'update-task', taskId: reopened.id, version: reopened.version + 1, done: false });
+  await owner.action({ action: 'share-list', listId, userId: memberId, permission: 'read' });
+  assert.equal((await member.action({ action: 'delete-completed-tasks', listId })).status, 403);
+  const before = (await owner.state()).tasks;
+  assert.equal(before.length, 5);
+  await owner.action({ action: 'share-list', listId, userId: memberId, permission: 'edit' });
+  assert.equal((await member.action({ action: 'delete-completed-tasks', listId })).status, 200);
+  const remaining = (await owner.state()).tasks;
+  assert.deepEqual(remaining, before.filter(task => task.list_id !== listId || !task.done));
+  assert.equal((await member.state()).tasks.length, 2);
+  assert.equal((await owner.action({ action: 'delete-completed-tasks', listId })).status, 200);
+  assert.deepEqual((await owner.state()).tasks, remaining);
+  assert.equal((await owner.action({ action: 'delete-completed-tasks', listId: otherListId })).status, 200);
+  assert.deepEqual((await owner.state()).tasks, remaining.filter(task => task.list_id !== otherListId || !task.done));
 });
 
 test('live event stream reports changes and revoked sessions lose access', async t => {

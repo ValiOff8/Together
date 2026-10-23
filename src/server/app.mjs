@@ -413,6 +413,8 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
           }
         } else if (action === 'complete-list') {
           db.prepare('UPDATE tasks SET done=1, version=version+1, updated_by=?, updated_at=? WHERE list_id=? AND done=0').run(user.id, Date.now(), list(user, input));
+        } else if (action === 'delete-completed-tasks') {
+          db.prepare('DELETE FROM tasks WHERE list_id=? AND done=1').run(list(user, input));
         } else if (action === 'rename-notebook') {
           ownerOnly(user);
           db.prepare("UPDATE settings SET value = ? WHERE key = 'name'").run(text(input, 'title', 80));

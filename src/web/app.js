@@ -190,7 +190,7 @@ function shell() {
             <label class="task-search">${icon('search')}<input id="task-search" aria-label="Search this list" placeholder="Search tasks…"><kbd>/</kbd></label></div>
           <form id="add-task" class="add-task"><span class="add-symbol">${icon('plus')}</span><input name="text" id="task-input" placeholder="What needs to get done?" aria-label="New task" maxlength="300" autocomplete="off" required><button type="submit" class="primary">Add task ${icon('arrow')}</button></form>
           <div id="task-list" class="task-list" aria-label="Tasks"></div>
-          <div class="list-footer"><span id="list-access-summary"></span><button class="text-button" data-command="complete-list" id="complete-all">${icon('check')} Check off all</button></div>
+          <div class="list-footer"><span id="list-access-summary"></span><button class="text-button" data-command="complete-list" id="task-bulk-action">${icon('check')} Check off all</button></div>
           </div>
           <div id="text-view" class="hidden">
             <div id="text-empty" class="empty-tasks hidden"><span class="empty-icon">${icon('note')}</span><h3>A little space for your notes.</h3><p>Text sheets use this list’s access permissions.</p><button class="primary" data-command="add-sheet">${icon('plus')} Create a text sheet</button></div>
@@ -352,7 +352,6 @@ function render() {
   $('#all-count').textContent = tasks.length;
   $('#open-count').textContent = tasks.length - done;
   $('#done-count').textContent = done;
-  $('#complete-all').disabled = !canEdit() || !tasks.some(task => !task.done);
   renderTasks();
   renderSheets();
   renderFiles();
@@ -614,6 +613,11 @@ function renderTasks() {
     tab.setAttribute('aria-pressed', active);
   });
   const all = state.tasks.filter(task => task.list_id === selectedList);
+  const deleteCompleted = filter === 'done';
+  const bulkAction = $('#task-bulk-action');
+  bulkAction.dataset.command = deleteCompleted ? 'delete-completed-tasks' : 'complete-list';
+  bulkAction.innerHTML = deleteCompleted ? `${icon('trash')} Delete all completed tasks` : `${icon('check')} Check off all`;
+  bulkAction.disabled = !canEdit() || !all.some(task => deleteCompleted ? task.done : !task.done);
   const tasks = all.filter(task => (filter === 'all' || (filter === 'done' ? task.done : !task.done)) && `${task.text} ${task.note}`.toLowerCase().includes(search.toLowerCase()));
   tasks.sort((a, b) => a.done - b.done);
   $('#task-list').innerHTML = tasks.length ? tasks.map(task => {
@@ -709,7 +713,7 @@ document.addEventListener('click', async event => {
   if (command === 'auth-switch') return renderAuth(button.dataset.mode);
   if (!state) return;
   if (button.disabled) return;
-  if (['upload-files', 'set-file-expiry', 'delete-file', 'add-sheet', 'retry-sheet', 'rename-sheet', 'delete-sheet', 'toggle-task', 'delete-task', 'complete-list', 'rename-list'].includes(command) && !canEdit()) return;
+  if (['upload-files', 'set-file-expiry', 'delete-file', 'add-sheet', 'retry-sheet', 'rename-sheet', 'delete-sheet', 'toggle-task', 'delete-task', 'complete-list', 'delete-completed-tasks', 'rename-list'].includes(command) && !canEdit()) return;
   if (['share-list', 'delete-list'].includes(command) && activeList()?.permission !== 'owner') return;
   if (command === 'share-list') return shareList();
   if (command === 'upload-files') return $('#file-input').click();
@@ -786,6 +790,10 @@ document.addEventListener('click', async event => {
   }
   if (command === 'complete-list') {
     return confirmAction('Everything taken care of?', 'This checks off every remaining task in this list. You can uncheck individual tasks any time.', 'Check off all', () => act({ action: 'complete-list', listId: selectedList }));
+  }
+  if (command === 'delete-completed-tasks') {
+    const listId = selectedList;
+    return confirmAction('Delete all completed tasks?', 'All completed tasks in this list will be permanently deleted for everyone, including tasks hidden by your search. Tasks still to do will be kept.', 'Delete all completed tasks', () => act({ action: 'delete-completed-tasks', listId }));
   }
   if (command === 'list-options') {
     const list = state.lists.find(item => item.id === selectedList);
