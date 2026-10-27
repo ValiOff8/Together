@@ -6,6 +6,10 @@ import { dirname, join, resolve } from 'node:path';
 import { request as httpRequest } from 'node:http';
 import { createApp, FILE_LIFETIME, MAX_FILE_SIZE, MAX_FILE_LIFETIME_MINUTES } from '../src/server/app.mjs';
 
+test('default file upload limit is 10 GiB', () => {
+  assert.equal(MAX_FILE_SIZE, 10737418240);
+});
+
 async function notebook(t) {
   const directory = await mkdtemp(join(tmpdir(), 'together-file-tests-'));
   const database = join(directory, 'notebook.sqlite');
@@ -57,6 +61,38 @@ async function member(owner, client) {
   assert.equal((await client.request('/api/register', { invite, name: 'Sam', email: 'sam@example.test', password: 'member test password' })).status, 201);
   return (await client.state()).me.id;
 }
+
+test('only the notebook owner can change the persistent upload limit', async t => {
+  const book = await notebook(t);
+  const { owner, listId, client } = book;
+  const friend = client();
+  await member(owner, friend);
+  assert.equal((await owner.state()).maxFileSize, MAX_FILE_SIZE);
+  assert.equal((await friend.action({ action: 'set-upload-limit', maxFileSize: 4 })).status, 403);
+  assert.equal((await client().action({ action: 'set-upload-limit', maxFileSize: 4 })).status, 401);
+  for (const maxFileSize of [undefined, 0, -1, 1.5, '4', null, true, {}, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal((await owner.action({ action: 'set-upload-limit', maxFileSize })).status, 400);
+  }
+  assert.equal((await owner.state()).maxFileSize, MAX_FILE_SIZE);
+  const existing = await owner.upload(listId, 'existing.txt', 'larger than new limit');
+  const { fileId } = await existing.json();
+  const revision = (await owner.state()).revision;
+  assert.equal((await owner.action({ action: 'set-upload-limit', maxFileSize: 4 })).status, 200);
+  assert.ok((await owner.state()).revision > revision);
+  assert.equal((await friend.state()).maxFileSize, 4);
+  assert.equal((await owner.upload(listId, 'fits.txt', '1234')).status, 201);
+  const oversized = await owner.upload(listId, 'too-big.txt', '12345');
+  assert.equal(oversized.status, 413);
+  assert.match((await oversized.json()).error, /4 bytes/);
+  await book.restart();
+  assert.equal((await owner.state()).maxFileSize, 4);
+  assert.equal(await (await owner.download(fileId)).text(), 'larger than new limit');
+  assert.equal((await owner.action({ action: 'set-upload-limit', maxFileSize: MAX_FILE_SIZE * 2 })).status, 200);
+  assert.equal((await owner.state()).maxFileSize, MAX_FILE_SIZE * 2);
+  assert.equal((await owner.upload(listId, 'fits-again.txt', '12345')).status, 201);
+  assert.equal((await owner.action({ action: 'set-upload-limit', maxFileSize: Number.MAX_SAFE_INTEGER })).status, 200);
+  assert.equal((await owner.state()).maxFileSize, Number.MAX_SAFE_INTEGER);
+});
 
 test('files retain original bytes and Unicode names, expire in 48 hours, persist, and delete from disk', async t => {
   const book = await notebook(t);
@@ -203,13 +239,15 @@ test('uploads reject unsafe names, cross-origin requests, wrong types, and overs
   }
   assert.equal((await owner.upload(listId, 'safe.txt', 'text', { Origin: 'https://other.example' })).status, 403);
   assert.equal((await owner.upload(listId, 'safe.txt', 'text', { 'Content-Type': 'text/html' })).status, 415);
+  const limit = 1024 * 1024;
+  assert.equal((await owner.action({ action: 'set-upload-limit', maxFileSize: limit })).status, 200);
   const response = await new Promise((resolve, reject) => {
     const request = httpRequest(`${origin}/api/files?${new URLSearchParams({ listId, name: 'large.bin' })}`, {
       method: 'POST', headers: { Cookie: owner.cookie, Origin: origin, 'Content-Type': 'application/octet-stream' },
     }, response => { response.resume(); response.on('end', () => resolve(response.statusCode)); });
     request.on('error', reject);
     const chunk = Buffer.alloc(256 * 1024);
-    let remaining = MAX_FILE_SIZE + 1;
+    let remaining = limit + 1;
     const send = () => {
       while (remaining > 0) {
         const part = chunk.subarray(0, Math.min(remaining, chunk.length));

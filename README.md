@@ -7,7 +7,7 @@ Private, shared to-do lists, text documents, and temporary file sharing for frie
 - Switch each list between tasks and a shared text document. Add, rename, and delete text sheets using the tabs at the bottom. Text saves automatically and concurrent edits are merged live.
 - Use **View as Markdown** in the text sheet toolbar to preview headings, lists, links, tables, and code blocks. Choose **Edit text** to return to the original text; the preview also follows live changes.
 - Download a text sheet as **Plain text (.txt)** or **Markdown (.md)** using the download button in its toolbar. Both formats include the current text, including unsaved changes.
-- Share files with multi-file uploads, drag and drop, upload progress, filename search, downloads, and manual deletion (up to 100 MB per file).
+- Share files with multi-file uploads, drag and drop, upload progress, filename search, downloads, and manual deletion (10 GiB per file by default; configurable by the notebook owner).
 - Files expire automatically after 48 hours by default. Set a different deletion time for each file using the clock button beside download.
 - Invite-only accounts with owner-managed access.
 - Private lists with per-person view or edit permissions, including tasks, text sheets, and shared files.
@@ -35,12 +35,20 @@ Text sheets support up to 100,000 characters each. Keep the tab open until it sa
 
 Open a list and select the **File share** icon beside the task and text document icons.
 
-- Select **Upload files** to choose one or more files, or drag them into the **Drop your files here** area. The area highlights while dragging; uploads show the filename, percentage, and a progress bar. Each file can be up to 100 MB.
+- Select **Upload files** to choose one or more files, or drag them into the **Drop your files here** area. The area highlights while dragging; uploads show the filename, percentage, and a progress bar. The current size limit is shown above the upload area.
 - Uploaded files appear one below another with their filename, size, uploader, and remaining time. Use **Search files** to filter by filename and the download button to save a copy.
 - Use the **clock button beside download** to change a file’s deletion time. Choose a duration in minutes, hours, or days, from **1 minute to 30 days**. The new countdown starts when you save; the dialog also shows the currently scheduled deletion time.
 - Use the trash button to delete a file immediately after confirming. Readers can download files; list owners and editors can also upload, change deletion times, and delete files.
 
 Every completed upload starts with a **48-hour** lifetime. The server automatically deletes expired files from storage and updates connected browsers, even when no one has the list open. Downloads stop at expiry, and expired files cannot be extended. If the server was stopped, it cleans up overdue files on restart. Deleting a list also deletes its shared files.
+
+### Upload size limit
+
+As the notebook owner, click the **notebook name in the sidebar**, set **Maximum size per file** in bytes, MiB, or GiB, then click **Save upload limit**. The default is **10 GiB**, including for existing installations without a saved limit. The setting is stored in SQLite, survives restarts, and updates in connected browsers. Only the notebook owner can change it.
+
+The limit applies to each new upload, including streamed uploads without a declared size. Uploads already in progress use the limit in effect when they started; existing files remain available. Values must be positive whole bytes, up to 9,007,199,254,740,991 bytes. One MiB is 1,048,576 bytes; one GiB is 1,073,741,824 bytes.
+
+Browser and server uploads have a 24-hour time limit. If you use a reverse proxy, configure its request-size and timeout limits to accommodate the uploads you allow, and ensure sufficient free disk space.
 
 ### File storage
 

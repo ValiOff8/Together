@@ -16,7 +16,7 @@ const fail = (status, message) => { throw new HttpError(status, message); };
 const publicUser = (user) => ({ id: user.id, email: user.email, name: user.name, role: user.role });
 export const FILE_LIFETIME = 48 * 60 * 60 * 1000;
 export const MAX_FILE_LIFETIME_MINUTES = 30 * 24 * 60;
-export const MAX_FILE_SIZE = 100 * 1024 * 1024;
+export const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024;
 function text(input, key, max = 200) {
   if (typeof input[key] !== 'string' || !input[key].trim() || input[key].trim().length > max) fail(400, `Please enter a valid ${key} (up to ${max} characters).`);
   return input[key].trim();
@@ -60,6 +60,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
   const revision = () => Number(db.prepare("SELECT value FROM settings WHERE key = 'revision'").get().value);
   const bump = () => db.prepare("UPDATE settings SET value = CAST(value AS INTEGER) + 1 WHERE key = 'revision'").run();
   const ownerOnly = user => { if (user.role !== 'owner') fail(403, 'Only the notebook owner can manage access.'); };
+  const maxFileSize = () => Number(db.prepare("SELECT value FROM settings WHERE key = 'maxFileSize'").get()?.value ?? MAX_FILE_SIZE);
   const validClient = client => Boolean(db.prepare('SELECT s.user_id FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.hash = ? AND s.expires_at > ?').get(client.sessionHash, Date.now()));
   function broadcast() {
     for (const client of clients) {
@@ -118,7 +119,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
       tasks: db.prepare('SELECT * FROM tasks ORDER BY created_at, id').all().filter(task => visible.has(task.list_id)),
       sheets: db.prepare('SELECT * FROM text_sheets ORDER BY created_at, id').all().filter(sheet => visible.has(sheet.list_id)).map(sheet => sheetSnapshot(sheet)),
       files: db.prepare('SELECT * FROM shared_files WHERE expires_at > ? ORDER BY created_at, id').all(Date.now()).filter(file => visible.has(file.list_id)),
-      maxFileSize: MAX_FILE_SIZE,
+      maxFileSize: maxFileSize(),
       maxFileLifetimeMinutes: MAX_FILE_LIFETIME_MINUTES,
       members: db.prepare('SELECT id, name, email, role FROM users ORDER BY created_at').all().map(m => ({ ...m, online: onlineIds.has(m.id) })),
       invitations: user.role === 'owner' ? db.prepare('SELECT id, email, expires_at FROM invitations WHERE expires_at > ? ORDER BY created_at').all(Date.now()) : [],
@@ -236,7 +237,9 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
         const name = text({ name: url.searchParams.get('name') }, 'name', 255);
         if (/[\\/\x00-\x1f\x7f]/.test(name) || name === '.' || name === '..') fail(400, 'Please use a valid file name without folders.');
         if (request.headers['content-type'] !== 'application/octet-stream') fail(415, 'Please send a file.');
-        if (Number(request.headers['content-length']) > MAX_FILE_SIZE) fail(413, 'Files can be up to 100 MB.');
+        const uploadLimit = maxFileSize();
+        const limitMessage = `Files can be up to ${uploadLimit} bytes. Please choose smaller files.`;
+        if (Number(request.headers['content-length']) > uploadLimit) fail(413, limitMessage);
         const id = randomUUID();
         let handle;
         let stored = false;
@@ -246,7 +249,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
           let size = 0;
           for await (const chunk of request.iterator({ destroyOnReturn: false })) {
             size += chunk.length;
-            if (size > MAX_FILE_SIZE) fail(413, 'Files can be up to 100 MB.');
+            if (size > uploadLimit) fail(413, limitMessage);
             await handle.writeFile(chunk);
           }
           await handle.close(); handle = null;
@@ -420,6 +423,10 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
         } else if (action === 'rename-notebook') {
           ownerOnly(user);
           db.prepare("UPDATE settings SET value = ? WHERE key = 'name'").run(text(input, 'title', 80));
+        } else if (action === 'set-upload-limit') {
+          ownerOnly(user);
+          if (!Number.isSafeInteger(input.maxFileSize) || input.maxFileSize < 1) fail(400, 'Please enter a positive file size in whole bytes (up to 9007199254740991).');
+          db.prepare("INSERT INTO settings (key, value) VALUES ('maxFileSize', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(input.maxFileSize));
         } else if (action === 'invite') {
           ownerOnly(user);
           const email = text(input, 'email', 254).toLowerCase();
@@ -460,7 +467,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
     }
   }, 25000);
   maintenance.unref();
-  server.requestTimeout = 300000;
+  server.requestTimeout = 24 * 60 * 60 * 1000;
   server.headersTimeout = 15000;
   return {
     server, db,

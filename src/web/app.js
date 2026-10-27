@@ -179,7 +179,7 @@ function shell() {
         <section id="list-content"><div class="list-heading"><div class="list-heading-copy"><h1 id="list-title">Your list</h1><p id="list-subtitle">One thing at a time. You’ve got this.</p></div><div class="list-controls"><div class="view-switch" role="group" aria-label="List view"><button type="button" id="list-symbol" class="list-symbol purple" data-command="select-view" data-view="tasks" title="Show to-do list" aria-label="Show to-do list" aria-pressed="true" aria-controls="tasks-view">${icon('tasks')}<span>To-do</span></button><button type="button" id="text-symbol" class="list-symbol purple" data-command="select-view" data-view="text" title="Show shared text document" aria-label="Show shared text document" aria-pressed="false" aria-controls="text-view">${icon('text')}<span>Text</span></button><button type="button" id="files-symbol" class="list-symbol purple" data-command="select-view" data-view="files" title="Show shared files" aria-label="Show shared files" aria-pressed="false" aria-controls="files-view">${icon('folder')}<span>Files</span></button></div><button class="icon-button" data-command="list-options" aria-label="List options" title="List options">${icon('more')}</button></div></div>
           <div id="files-view" class="hidden">
             <div class="file-retention"><span class="file-retention-icon">${icon('clock')}</span><div><strong>A little space to share.</strong><p>Files are automatically deleted when their timer runs out.</p></div><span class="file-retention-badge">48h by default</span></div>
-            <div id="file-dropzone" class="file-dropzone"><span class="file-upload-icon">${icon('upload')}</span><div class="file-upload-copy"><strong>Drop your files here</strong><span>or choose from your device · up to 100 MB per file</span></div><button type="button" class="primary" id="upload-files" data-command="upload-files">${icon('plus')} Upload files</button><input type="file" id="file-input" class="hidden" multiple aria-label="Choose files to upload"></div>
+            <div id="file-dropzone" class="file-dropzone"><span class="file-upload-icon">${icon('upload')}</span><div class="file-upload-copy"><strong>Drop your files here</strong><span>or choose from your device</span></div><button type="button" class="primary" id="upload-files" data-command="upload-files">${icon('plus')} Upload files</button><input type="file" id="file-input" class="hidden" multiple aria-label="Choose files to upload"></div>
             <div id="file-upload-status" class="file-upload-status hidden" role="status" aria-live="polite"><span id="file-upload-message"></span><progress id="file-upload-progress" max="100" value="0" aria-label="File upload progress"></progress></div>
             <div class="task-toolbar file-toolbar"><div class="file-heading">Shared files <span id="file-count">0</span></div><label class="task-search">${icon('search')}<input id="file-search" aria-label="Search files" placeholder="Search files…"></label></div>
             <div id="file-list" class="task-list" aria-label="Shared files"></div>
@@ -360,8 +360,9 @@ function render() {
 
 function fileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  if (bytes < 1024 ** 3) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  return `${(bytes / (1024 ** 3)).toFixed(1)} GiB`;
 }
 function renderFiles() {
   if (!state || !$('#file-list')) return;
@@ -369,6 +370,7 @@ function renderFiles() {
   const all = state.files.filter(file => file.list_id === selectedList && file.expires_at > now);
   const files = all.filter(file => file.name.toLowerCase().includes(fileSearch.toLowerCase()));
   $('#file-count').textContent = all.length;
+  $('.file-upload-copy span').textContent = `or choose from your device · up to ${fileSize(state.maxFileSize)} per file`;
   $('#file-dropzone').classList.toggle('hidden', !canEdit());
   $('#file-access-summary').textContent = $('#list-access-summary').textContent;
   $('#upload-files').disabled = Boolean(uploading);
@@ -412,7 +414,7 @@ function renderUploadStatus() {
 }
 async function uploadFiles(files) {
   if (!files.length || uploading || !canEdit()) return;
-  if (files.some(file => file.size > state.maxFileSize)) { toast('Files can be up to 100 MB. Please choose smaller files.', true); return; }
+  if (files.some(file => file.size > state.maxFileSize)) { toast(`Files can be up to ${fileSize(state.maxFileSize)}. Please choose smaller files.`, true); return; }
   const listId = selectedList;
   let uploaded = 0;
   uploading = { listId, current: 0, total: files.length, name: '', percent: 0 };
@@ -425,7 +427,7 @@ async function uploadFiles(files) {
         const request = new XMLHttpRequest();
         request.open('POST', `/api/files?${new URLSearchParams({ listId, name: file.name })}`);
         request.setRequestHeader('Content-Type', 'application/octet-stream');
-        request.timeout = 300000;
+        request.timeout = 24 * 60 * 60 * 1000;
         request.upload.onprogress = event => {
           if (event.lengthComputable) { uploading.percent = Math.round(event.loaded / event.total * 100); renderUploadStatus(); }
         };
@@ -822,6 +824,19 @@ document.addEventListener('click', async event => {
     if (state.me.role !== 'owner') return showInvite();
     modal('A place for your people.', `<form id="notebook-form"><label>Notebook name<input name="title" value="${escape(state.name)}" maxlength="80" required autofocus></label><button type="submit" class="primary full">Save name ${icon('check')}</button></form>`);
     $('#notebook-form').addEventListener('submit', async event => { event.preventDefault(); if (await act({ action: 'rename-notebook', ...Object.fromEntries(new FormData(event.currentTarget)) })) closeDialog(); });
+    const unit = state.maxFileSize % (1024 ** 3) === 0 ? 1024 ** 3 : state.maxFileSize % (1024 ** 2) === 0 ? 1024 ** 2 : 1;
+    $('#notebook-form').insertAdjacentHTML('afterend', `<form id="upload-limit-form"><div class="file-expiry-fields"><label>Maximum size per file<input name="amount" type="number" min="1" max="${Math.floor(Number.MAX_SAFE_INTEGER / unit)}" step="1" value="${state.maxFileSize / unit}" required></label><label>Unit<select name="unit"><option value="1"${unit === 1 ? ' selected' : ''}>Bytes</option><option value="1048576"${unit === 1024 ** 2 ? ' selected' : ''}>MiB</option><option value="1073741824"${unit === 1024 ** 3 ? ' selected' : ''}>GiB</option></select></label></div><p class="modal-footnote">Applies to new uploads for everyone. Existing files are unchanged.</p><button type="submit" class="primary full">Save upload limit ${icon('check')}</button></form>`);
+    const amountInput = $('#upload-limit-form input[name="amount"]');
+    const unitInput = $('#upload-limit-form select[name="unit"]');
+    unitInput.addEventListener('change', () => { amountInput.max = Math.floor(Number.MAX_SAFE_INTEGER / Number(unitInput.value)); });
+    $('#upload-limit-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const data = new FormData(event.currentTarget);
+      const amount = Number(data.get('amount'));
+      const maxFileSize = amount * Number(data.get('unit'));
+      if (!Number.isSafeInteger(amount) || !Number.isSafeInteger(maxFileSize) || maxFileSize < 1) return toast('Please enter a valid positive file size.', true);
+      if (await act({ action: 'set-upload-limit', maxFileSize })) { closeDialog(); toast('Upload limit updated.'); }
+    });
     return;
   }
   if (command === 'logout') {
