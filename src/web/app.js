@@ -188,7 +188,7 @@ function shell() {
           <div id="tasks-view"><div class="progress-panel"><div><span class="progress-icon">${icon('check')}</span><span id="progress-text">A fresh start</span></div><span id="progress-count">0 of 0 done</span><progress id="progress" max="100" value="0" aria-label="List completion"></progress></div>
           <div class="task-toolbar"><div class="tabs" role="group" aria-label="Filter tasks"><button class="tab active" data-command="filter" data-filter="all" aria-pressed="true">All tasks <span id="all-count">0</span></button><button class="tab" data-command="filter" data-filter="open" aria-pressed="false">To do <span id="open-count">0</span></button><button class="tab" data-command="filter" data-filter="done" aria-pressed="false">Done <span id="done-count">0</span></button></div>
             <label class="task-search">${icon('search')}<input id="task-search" aria-label="Search this list" placeholder="Search tasks…"><kbd>/</kbd></label></div>
-          <form id="add-task" class="add-task"><span class="add-symbol">${icon('plus')}</span><input name="text" id="task-input" placeholder="What needs to get done?" aria-label="New task" maxlength="300" autocomplete="off" required><button type="submit" class="primary">Add task ${icon('arrow')}</button></form>
+          <form id="add-task" class="add-task"><span class="add-symbol">${icon('plus')}</span><input name="text" id="task-input" placeholder="What needs to get done?" aria-label="New task" maxlength="300" autocomplete="off" required><button type="submit" class="primary">Add task ${icon('arrow')}</button><textarea class="add-task-note" name="note" id="task-note" rows="1" maxlength="2000" aria-label="Notes (optional)" placeholder="Add a note (optional)"></textarea></form>
           <div id="task-list" class="task-list" aria-label="Tasks"></div>
           <div class="list-footer"><span id="list-access-summary"></span><button class="text-button" data-command="complete-list" id="task-bulk-action">${icon('check')} Check off all</button></div>
           </div>
@@ -239,9 +239,10 @@ function shell() {
   $('#add-task').addEventListener('submit', async event => {
     event.preventDefault();
     const input = $('#task-input');
+    const note = $('#task-note');
     const taskText = input.value.trim();
     if (!taskText || busy || !canEdit()) return;
-    if (await act({ action: 'add-task', listId: selectedList, text: taskText })) { input.value = ''; input.focus(); }
+    if (await act({ action: 'add-task', listId: selectedList, text: taskText, note: note.value })) { input.value = ''; note.value = ''; input.focus(); }
   });
 }
 

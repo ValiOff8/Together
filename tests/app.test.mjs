@@ -32,6 +32,23 @@ async function start(database = ':memory:', appUrl = '') {
 const ownerCredentials = { name: 'Alex Owner', email: 'alex@example.com', password: 'owner password 123' };
 const memberCredentials = { name: 'Sam Friend', email: 'sam@example.com', password: 'member password 123' };
 
+test('tasks can be created with optional notes and reject invalid notes', async t => {
+  const { app, client } = await start(); t.after(() => app.close());
+  const owner = client();
+  await owner.request('/api/setup', ownerCredentials);
+  const listId = (await owner.state()).lists[0].id;
+  for (const [input, expected] of [[{}, ''], [{ note: '' }, ''], [{ note: '  First line\nSecond line  ' }, 'First line\nSecond line'], [{ note: 'a'.repeat(2000) }, 'a'.repeat(2000)]]) {
+    const text = `Task ${expected.length}`;
+    assert.equal((await owner.action({ action: 'add-task', listId, text, ...input })).status, 200);
+    assert.ok((await owner.state()).tasks.some(task => task.text === text && task.note === expected));
+  }
+  const count = (await owner.state()).tasks.length;
+  for (const note of [null, 123, {}, 'a'.repeat(2001)]) {
+    assert.equal((await owner.action({ action: 'add-task', listId, text: 'Invalid note', note })).status, 400);
+  }
+  assert.equal((await owner.state()).tasks.length, count);
+});
+
 async function inviteMember(owner, member, credentials = memberCredentials) {
   const invitation = await owner.action({ action: 'invite', email: credentials.email });
   assert.equal(invitation.status, 200);

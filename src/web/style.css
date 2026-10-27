@@ -274,3 +274,6 @@ dialog{border:1px solid #ece6f3;border-radius:17px;padding:30px;width:calc(100% 
 .share-permission select { font: inherit; color: var(--ink); background: var(--surface, #fff); border: 1px solid var(--control-border, #e3dfeb); border-radius: 8px; padding: 10px; max-width: 100%; }
 .share-permission select:focus-visible { outline: 3px solid var(--purple); outline-offset: 2px; }
 #sheet-editor:read-only { cursor: default; }
+.add-task { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; row-gap: 0; }
+.add-task > .add-task-note { grid-column: 2; margin: 6px 0 5px; padding: 9px 12px; height: 42px; min-height: 42px; border: 1px solid var(--border, #e3dfeb); border-radius: 9px; background: transparent; box-shadow: none; font-size: .875rem; font-weight: 400; resize: vertical; }
+.add-task > .add-task-note:focus { border-color: var(--focus-ring, var(--purple)); }
