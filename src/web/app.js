@@ -625,7 +625,7 @@ function renderTasks() {
   tasks.sort((a, b) => a.done - b.done);
   $('#task-list').innerHTML = tasks.length ? tasks.map(task => {
     const author = state.members.find(member => member.id === task.updated_by);
-    return `<article class="task-row${task.done ? ' completed' : ''}"><button class="task-checkbox" role="checkbox" aria-checked="${Boolean(task.done)}" aria-label="${escape(task.done ? 'Mark as to do: ' : 'Complete: ')}${escape(task.text)}" data-command="toggle-task" data-id="${escape(task.id)}">${task.done ? icon('check') : ''}</button><button class="task-copy" data-command="edit-task" data-id="${escape(task.id)}" aria-label="Edit ${escape(task.text)}"><span class="task-title">${escape(task.text)}</span>${task.note ? `<span class="task-note">${icon('note')}${escape(task.note)}</span>` : ''}</button><div class="task-actions">${author ? `<span class="task-author" title="Last changed by ${escape(author.name)}">${escape(initials(author.name))}</span>` : ''}<button class="icon-button" data-command="edit-task" data-id="${escape(task.id)}" aria-label="Edit task">${icon('edit')}</button></div></article>`;
+    return `<article class="task-row${task.done ? ' completed' : ''}"><button class="task-checkbox" role="checkbox" aria-checked="${Boolean(task.done)}" aria-label="${escape(task.done ? 'Mark as to do: ' : 'Complete: ')}${escape(task.text)}" data-command="toggle-task" data-id="${escape(task.id)}">${task.done ? icon('check') : ''}</button><button class="task-copy" data-command="edit-task" data-id="${escape(task.id)}" aria-label="Edit ${escape(task.text)}"><span class="task-title">${escape(task.text)}</span>${task.note ? `<span class="task-note">${icon('note')}${escape(task.note)}</span>` : ''}</button><div class="task-actions">${author ? `<span class="task-author" title="Last changed by ${escape(author.name)}">${escape(initials(author.name))}</span>` : ''}<div class="task-action-buttons"><button class="icon-button" data-command="edit-task" data-id="${escape(task.id)}" aria-label="Edit task" title="Edit task">${icon('edit')}</button><button class="icon-button task-delete" data-command="delete-task" data-id="${escape(task.id)}" aria-label="Delete ${escape(task.text)}" title="Delete task">${icon('trash')}</button></div></div></article>`;
   }).join('') : `<div class="empty-tasks"><span class="empty-icon">${icon(search ? 'search' : filter === 'done' ? 'check' : 'list')}</span><h3>${search ? 'No matching tasks.' : filter === 'done' ? 'Your little wins will live here.' : filter === 'open' && all.length ? 'A clean slate. Nicely done.' : 'Big plans start with a small task.'}</h3><p>${search ? 'Try a different word or clear your search.' : filter === 'done' ? 'Check off a task and watch your progress grow.' : filter === 'open' && all.length ? 'Everything on this list is checked off.' : 'Add your first task above. You can figure out the rest together.'}</p></div>`;
   if (!canEdit()) {
     for (const button of $('#task-list').querySelectorAll('.task-checkbox, .task-actions button')) button.disabled = true;
@@ -787,8 +787,8 @@ document.addEventListener('click', async event => {
   }
   if (command === 'delete-task') {
     const task = state.tasks.find(item => item.id === id);
-    const version = Number(dialog.dataset.taskVersion);
     if (!task) return;
+    const version = button.closest('#edit-task-form') ? Number(dialog.dataset.taskVersion) : task.version;
     return confirmAction('Remove this task?', task.text, 'Delete task', () => act({ action: 'delete-task', taskId: id, version }));
   }
   if (command === 'complete-list') {
