@@ -8,6 +8,11 @@ dialog{border:1px solid #ece6f3;border-radius:17px;padding:30px;width:calc(100% 
 @media(max-width:400px){.task-toolbar{column-gap:10px}.task-search{max-width:none;width:100%}.task-search kbd{display:none}.tab{gap:5px}.progress-panel{padding:13px 12px}.add-task{padding-left:11px;gap:7px}.add-task>.primary>.icon{display:none}.avatar-group{display:none}.page-footer{font-size:7px}.inline-input{flex-wrap:wrap}.inline-input input{flex-basis:100%}.inline-input>button{width:100%}dialog{padding:24px}.modal-head h2{font-size:24px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 
+/* Completion information stays below the task content, aligned to the right. */
+.task-row.completed { flex-wrap: wrap; row-gap: 8px; }
+.task-completion { flex-basis: 100%; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 4px; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.task-completion time { white-space: nowrap; }
+
 /* More room for task notes, with quiet audit information below the actions. */
 dialog.task-details { max-width: 600px; }
 .task-details textarea { min-height: 160px; }

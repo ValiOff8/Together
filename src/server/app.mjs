@@ -415,10 +415,14 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
             const note = input.note === undefined ? task.note : typeof input.note === 'string' && input.note.length <= 2000 ? input.note.trim() : null;
             if (note === null || (input.done !== undefined && typeof input.done !== 'boolean')) fail(400, 'Please enter a valid task.');
             const done = input.done === undefined ? task.done : input.done ? 1 : 0;
-            db.prepare('UPDATE tasks SET text=?, note=?, done=?, version=version+1, updated_by=?, updated_at=? WHERE id=?').run(taskText, note, done, user.id, Date.now(), taskId);
+            const now = Date.now();
+            const completedBy = done ? (task.done ? task.completed_by : user.id) : null;
+            const completedAt = done ? (task.done ? task.completed_at : now) : null;
+            db.prepare('UPDATE tasks SET text=?, note=?, done=?, version=version+1, updated_by=?, updated_at=?, completed_by=?, completed_at=? WHERE id=?').run(taskText, note, done, user.id, now, completedBy, completedAt, taskId);
           }
         } else if (action === 'complete-list') {
-          db.prepare('UPDATE tasks SET done=1, version=version+1, updated_by=?, updated_at=? WHERE list_id=? AND done=0').run(user.id, Date.now(), list(user, input));
+          const now = Date.now();
+          db.prepare('UPDATE tasks SET done=1, version=version+1, updated_by=?, updated_at=?, completed_by=?, completed_at=? WHERE list_id=? AND done=0').run(user.id, now, user.id, now, list(user, input));
         } else if (action === 'delete-completed-tasks') {
           db.prepare('DELETE FROM tasks WHERE list_id=? AND done=1').run(list(user, input));
         } else if (action === 'rename-notebook') {
