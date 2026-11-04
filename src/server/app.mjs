@@ -401,7 +401,8 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
           const listId = list(user, input);
           const note = input.note === undefined ? '' : typeof input.note === 'string' && input.note.length <= 2000 ? input.note.trim() : null;
           if (note === null) fail(400, 'Please enter a valid task.');
-          db.prepare('INSERT INTO tasks (id,list_id,text,note,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(randomUUID(), listId, text(input, 'text', 300), note, user.id, Date.now(), Date.now());
+          const now = Date.now();
+          db.prepare('INSERT INTO tasks (id,list_id,text,note,created_by,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)').run(randomUUID(), listId, text(input, 'text', 300), note, user.id, user.id, now, now);
         } else if (action === 'update-task' || action === 'delete-task') {
           const taskId = text(input, 'taskId', 100);
           const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);

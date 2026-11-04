@@ -52,6 +52,9 @@ export function openDatabase(filename) {
     INSERT OR IGNORE INTO settings VALUES ('revision', '0');
   `);
   transaction(db, () => {
+    if (!db.prepare('PRAGMA table_info(tasks)').all().some(column => column.name === 'created_by')) {
+      db.exec('ALTER TABLE tasks ADD COLUMN created_by TEXT');
+    }
     const legacy = !db.prepare('PRAGMA table_info(lists)').all().some(column => column.name === 'owner_id');
     if (legacy) db.exec('ALTER TABLE lists ADD COLUMN owner_id TEXT REFERENCES users(id) ON DELETE RESTRICT');
     db.exec(`CREATE TABLE IF NOT EXISTS list_permissions (
@@ -65,7 +68,7 @@ export function openDatabase(filename) {
         INSERT INTO list_permissions (list_id, user_id, permission)
         SELECT l.id, u.id, 'edit' FROM lists l CROSS JOIN users u WHERE u.id != l.owner_id;`);
     }
-    db.exec('PRAGMA user_version = 4');
+    db.exec('PRAGMA user_version = 5');
   });
   return db;
 }

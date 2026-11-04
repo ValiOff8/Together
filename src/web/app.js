@@ -656,14 +656,26 @@ function listForm(rename = false) {
     if (await act({ action: rename ? 'rename-list' : 'add-list', listId: selectedList, ...Object.fromEntries(new FormData(event.currentTarget)) })) closeDialog();
   });
 }
+function taskMetadata(task) {
+  const memberName = id => state.members.find(member => member.id === id)?.name || 'Unknown';
+  const timestamp = value => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 'Unknown';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Unknown';
+    return `<time datetime="${date.toISOString()}">${escape(date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }))}</time>`;
+  };
+  return `<dl class="task-metadata" aria-label="Task information"><div><dt>Changed by</dt><dd><span>${escape(memberName(task.updated_by))}</span><span>${timestamp(task.updated_at)}</span></dd></div><div><dt>Created by</dt><dd><span>${escape(memberName(task.created_by))}</span><span>${timestamp(task.created_at)}</span></dd></div></dl>`;
+}
 function editTask(id) {
   const task = state.tasks.find(item => item.id === id);
   if (!task) return;
   if (!canEdit(task.list_id)) {
-    modal('Task details.', `<label>Task<input value="${escape(task.text)}" readonly></label><label>Notes<textarea rows="6" readonly>${escape(task.note)}</textarea></label><p class="modal-footnote">Read-only access</p>`);
+    modal('Task details.', `<label>Task<input value="${escape(task.text)}" readonly></label><label>Notes<textarea rows="7" readonly>${escape(task.note)}</textarea></label><p class="modal-footnote">Read-only access</p>${taskMetadata(task)}`);
+    dialog.classList.add('task-details');
     return;
   }
-  modal('The little details.', `<form id="edit-task-form"><label>Task<input name="text" value="${escape(task.text)}" maxlength="300" required autofocus></label><label>Notes <span class="optional">optional</span><textarea name="note" rows="4" maxlength="2000" placeholder="Anything your friends should know?">${escape(task.note)}</textarea></label><div class="modal-actions"><button type="button" class="danger-quiet" data-command="delete-task" data-id="${escape(id)}">${icon('trash')} Delete task</button><button type="submit" class="primary">Save changes ${icon('check')}</button></div></form>`);
+  modal('The little details.', `<form id="edit-task-form"><label>Task<input name="text" value="${escape(task.text)}" maxlength="300" required autofocus></label><label>Notes <span class="optional">optional</span><textarea name="note" rows="7" maxlength="2000" placeholder="Anything your friends should know?">${escape(task.note)}</textarea></label><div class="modal-actions"><button type="button" class="danger-quiet" data-command="delete-task" data-id="${escape(id)}">${icon('trash')} Delete task</button><button type="submit" class="primary">Save changes ${icon('check')}</button></div></form>${taskMetadata(task)}`);
+  dialog.classList.add('task-details');
   $('#edit-task-form').addEventListener('submit', async event => {
     event.preventDefault();
     if (await act({ action: 'update-task', taskId: task.id, version: task.version, ...Object.fromEntries(new FormData(event.currentTarget)) })) closeDialog();

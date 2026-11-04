@@ -8,6 +8,16 @@ dialog{border:1px solid #ece6f3;border-radius:17px;padding:30px;width:calc(100% 
 @media(max-width:400px){.task-toolbar{column-gap:10px}.task-search{max-width:none;width:100%}.task-search kbd{display:none}.tab{gap:5px}.progress-panel{padding:13px 12px}.add-task{padding-left:11px;gap:7px}.add-task>.primary>.icon{display:none}.avatar-group{display:none}.page-footer{font-size:7px}.inline-input{flex-wrap:wrap}.inline-input input{flex-basis:100%}.inline-input>button{width:100%}dialog{padding:24px}.modal-head h2{font-size:24px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 
+/* More room for task notes, with quiet audit information below the actions. */
+dialog.task-details { max-width: 600px; }
+.task-details textarea { min-height: 160px; }
+.task-metadata { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 24px; margin: 18px 0 0; padding-top: 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 10px; line-height: 1.5; }
+.task-metadata > div { display: flex; gap: 8px; min-width: 0; max-width: 100%; }
+.task-metadata dt { font-weight: 400; white-space: nowrap; }
+.task-metadata dd { display: flex; gap: 10px; margin: 0; min-width: 0; }
+.task-metadata dd > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.task-metadata dd > span:last-child { white-space: nowrap; }
+
 /* Tasks and shared text sheets use the same workspace. */
 .view-switch { display: flex; gap: 6px; }
 .view-switch .list-symbol { margin: 0; border: 1px solid transparent; cursor: pointer; padding: 0; }

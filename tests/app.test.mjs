@@ -57,6 +57,33 @@ async function inviteMember(owner, member, credentials = memberCredentials) {
   return (await member.state()).me.id;
 }
 
+test('task audit information preserves the creator when another member edits or completes tasks', async t => {
+  const { app, client } = await start(); t.after(() => app.close());
+  const owner = client(), member = client();
+  await owner.request('/api/setup', ownerCredentials);
+  const initial = await owner.state();
+  const listId = initial.lists[0].id;
+  const memberId = await inviteMember(owner, member);
+  await owner.action({ action: 'share-list', listId, userId: memberId, permission: 'edit' });
+  await owner.action({ action: 'add-task', listId, text: 'Plan together', created_by: memberId });
+  const original = (await owner.state()).tasks[0];
+  assert.equal(original.created_by, initial.me.id);
+  assert.equal(original.updated_by, initial.me.id);
+  assert.equal(original.created_at, original.updated_at);
+  assert.equal((await member.action({ action: 'update-task', taskId: original.id, version: original.version, note: 'Updated by Sam', created_by: memberId })).status, 200);
+  let changed = (await member.state()).tasks[0];
+  assert.equal(changed.created_by, original.created_by);
+  assert.equal(changed.created_at, original.created_at);
+  assert.equal(changed.updated_by, memberId);
+  assert.ok(changed.updated_at >= original.updated_at);
+  assert.equal((await member.action({ action: 'complete-list', listId })).status, 200);
+  changed = (await member.state()).tasks[0];
+  assert.equal(changed.created_by, original.created_by);
+  assert.equal(changed.created_at, original.created_at);
+  assert.equal(changed.updated_by, memberId);
+  assert.equal(changed.done, 1);
+});
+
 test('private lists enforce grants on every task and sheet mutation, including revocation', async t => {
   const { app, client } = await start(); t.after(() => app.close());
   const owner = client(), member = client(), other = client();
@@ -158,12 +185,18 @@ test('legacy lists retain current collaborators once; grants and private lists s
     legacy.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL,
       password_hash TEXT NOT NULL, role TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE TABLE lists (id TEXT PRIMARY KEY, title TEXT NOT NULL, color TEXT NOT NULL, created_at INTEGER NOT NULL);
+      CREATE TABLE tasks (id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), text TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1,
+        updated_by TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
       INSERT INTO users VALUES ('owner', 'owner@example.com', 'Owner', '', 'owner', 1), ('member', 'member@example.com', 'Member', '', 'member', 2);
       INSERT INTO lists VALUES ('legacy', 'Legacy list', 'purple', 1);
+      INSERT INTO tasks (id,list_id,text,updated_by,created_at,updated_at) VALUES ('old-task','legacy','Old task','member',1,2);
       PRAGMA user_version = 2;`);
     legacy.close();
     running = await start(filename);
     let db = running.app.db;
+    assert.equal(db.prepare('SELECT created_by FROM tasks').get().created_by, null);
+    assert.equal(db.prepare('SELECT updated_by FROM tasks').get().updated_by, 'member');
     assert.equal(db.prepare('SELECT owner_id FROM lists').get().owner_id, 'owner');
     assert.equal(db.prepare('SELECT permission FROM list_permissions').get().permission, 'edit');
     const { createSession } = await import('../src/server/auth.mjs');
@@ -176,6 +209,7 @@ test('legacy lists retain current collaborators once; grants and private lists s
     const privateId = (await action({ action: 'add-list', title: 'Private after upgrade' })).listId;
     await running.app.close(); running = null;
     running = await start(filename); db = running.app.db;
+    assert.equal(db.prepare('SELECT created_by FROM tasks').get().created_by, null);
     assert.equal(db.prepare('SELECT permission FROM list_permissions WHERE list_id = ?').get('legacy').permission, 'read');
     assert.equal(db.prepare('SELECT count(*) AS count FROM list_permissions WHERE list_id = ?').get(privateId).count, 0);
     // A revoked legacy grant must not be restored by the migration on restart.
@@ -183,7 +217,7 @@ test('legacy lists retain current collaborators once; grants and private lists s
     await running.app.close(); running = null;
     running = await start(filename);
     assert.equal(running.app.db.prepare('SELECT count(*) AS count FROM list_permissions').get().count, 0);
-    assert.equal(running.app.db.prepare('PRAGMA user_version').get().user_version, 4);
+    assert.equal(running.app.db.prepare('PRAGMA user_version').get().user_version, 5);
   } finally {
     if (running) await running.app.close();
     await rm(directory, { recursive: true, force: true });
