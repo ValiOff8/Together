@@ -43,6 +43,7 @@ let filter = ['all', 'open', 'done'].includes(savedFilter) ? savedFilter : 'all'
 let search = '';
 let events = null;
 let busy = false;
+let taskNoteObserver;
 let toastTimer;
 let refreshSequence = 0;
 let latestApplied = 0;
@@ -101,6 +102,7 @@ function downloadSheet() {
 
 async function boot() {
   events?.close(); events = null;
+  taskNoteObserver?.disconnect();
   try {
     const session = await api('session');
     if (!session.user) {
@@ -236,14 +238,30 @@ function shell() {
     const index = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
     tabs[index].click(); document.getElementById(tabs[index].id)?.focus();
   });
+  const note = $('#task-note');
+  note.addEventListener('input', resizeTaskNote);
+  let noteWidth;
+  taskNoteObserver = new ResizeObserver(([entry]) => {
+    if (entry.contentRect.width === noteWidth) return;
+    noteWidth = entry.contentRect.width;
+    resizeTaskNote();
+  });
+  taskNoteObserver.observe(note);
   $('#add-task').addEventListener('submit', async event => {
     event.preventDefault();
     const input = $('#task-input');
     const note = $('#task-note');
     const taskText = input.value.trim();
     if (!taskText || busy || !canEdit()) return;
-    if (await act({ action: 'add-task', listId: selectedList, text: taskText, note: note.value })) { input.value = ''; note.value = ''; input.focus(); }
+    if (await act({ action: 'add-task', listId: selectedList, text: taskText, note: note.value })) { input.value = ''; note.value = ''; resizeTaskNote(); input.focus(); }
   });
+}
+
+function resizeTaskNote() {
+  const note = $('#task-note');
+  if (!note?.getClientRects().length) return;
+  note.style.height = 'auto';
+  note.style.height = `${note.scrollHeight + note.offsetHeight - note.clientHeight}px`;
 }
 
 function connection(connected) {

@@ -360,5 +360,5 @@ dialog.task-details { max-width: 600px; }
 .task-delete:hover { color: #b83b40; }
 [data-theme="dark"] .task-delete:hover { color: #ff8583; }
 .add-task { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; row-gap: 0; }
-.add-task > .add-task-note { grid-column: 2; margin: 6px 0 5px; padding: 9px 12px; height: 42px; min-height: 42px; border: 1px solid var(--border, #e3dfeb); border-radius: 9px; background: transparent; box-shadow: none; font-size: .875rem; font-weight: 400; resize: vertical; }
+.add-task > .add-task-note { grid-column: 2; margin: 6px 0 5px; padding: 9px 12px; height: auto; min-height: 42px; border: 1px solid var(--border, #e3dfeb); border-radius: 9px; background: transparent; box-shadow: none; font-size: .875rem; font-weight: 400; resize: none; overflow: hidden; }
 .add-task > .add-task-note:focus { border-color: var(--focus-ring, var(--purple)); }
