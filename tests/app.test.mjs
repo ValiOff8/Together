@@ -272,7 +272,7 @@ test('legacy lists retain current collaborators once; grants and private lists s
 test('first account is the owner; all notebook data requires authentication', async t => {
   const { app, client } = await start(); t.after(() => app.close());
   const owner = client(), anonymous = client();
-  assert.deepEqual((await anonymous.request('/api/session')).data, { user: null, setupNeeded: true });
+  assert.deepEqual((await anonymous.request('/api/session')).data, { user: null, setupNeeded: true, nameOnlyLogin: false });
   assert.equal((await anonymous.request('/api/state')).status, 401);
   assert.equal((await anonymous.action({ action: 'add-list', title: 'Unauthorized' })).status, 401);
   const setup = await owner.request('/api/setup', ownerCredentials);

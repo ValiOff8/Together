@@ -1,6 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { difference, applyOperation, transformOperations, rebaseDraft, acknowledgeDraft } from '../src/web/text-operations.js';
+import { createOperationId, difference, applyOperation, transformOperations, rebaseDraft, acknowledgeDraft } from '../src/web/text-operations.js';
+
+test('save identifiers work without randomUUID on HTTP origins and remain distinct', t => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { getRandomValues } });
+  t.after(() => Object.defineProperty(globalThis, 'crypto', original));
+  assert.equal(globalThis.crypto.randomUUID, undefined);
+  const ids = Array.from({ length: 1000 }, () => createOperationId());
+  for (const id of ids) assert.match(id, /^[a-f0-9]{32}$/);
+  assert.equal(new Set(ids).size, ids.length);
+});
 
 test('text edits preserve whitespace, newlines, Unicode, and empty sheets', () => {
   for (const before of ['', 'Hello world', '  ä😀\nsecond line\n']) {

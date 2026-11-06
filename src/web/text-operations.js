@@ -1,5 +1,10 @@
 // Text operations use positive retains, negative deletes, and inserted strings.
 // Both the server and browser use the same transformation rules.
+export function createOperationId() {
+  // getRandomValues also works on HTTP LAN origins, where randomUUID is unavailable.
+  return Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
 function append(parts, part) {
   if (part === '' || part === 0) return;
   const last = parts.at(-1);

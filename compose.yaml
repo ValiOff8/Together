@@ -5,6 +5,8 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-3000}:3000"
     environment:
       APP_URL: ${APP_URL:-http://localhost:3000}
+      APP_ALLOWED_ORIGINS: ${APP_ALLOWED_ORIGINS:-}
+      LOCAL_NAME_LOGIN: ${LOCAL_NAME_LOGIN:-false}
       DATABASE_PATH: /app/data/together.sqlite
     volumes:
       - together-data:/app/data

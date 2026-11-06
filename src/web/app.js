@@ -1,4 +1,4 @@
-import { difference, applyOperation, rebaseDraft, acknowledgeDraft } from './text-operations.js';
+import { createOperationId, difference, applyOperation, rebaseDraft, acknowledgeDraft } from './text-operations.js';
 import { renderMarkdown } from './markdown.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -106,6 +106,7 @@ async function boot() {
   try {
     const session = await api('session');
     if (!session.user) {
+      if (session.nameOnlyLogin) { renderNameLogin(); return; }
       let invalidInvite = '';
       if (inviteToken) {
         try { await api('invitation?token=' + encodeURIComponent(inviteToken)); }
@@ -122,6 +123,24 @@ async function boot() {
   } catch (error) {
     app.innerHTML = `<div class="loading"><span class="brand-mark">✓</span><h2>We couldn’t open your notebook.</h2><p>${escape(error.message)}</p><button class="primary" data-command="retry">Try again ${icon('arrow')}</button></div>`;
   }
+}
+
+function renderNameLogin() {
+  app.innerHTML = `<main class="auth-page"><section class="auth-form-area">${themeButton(true)}<div class="auth-card"><span class="small-mark">${icon('users')}</span><h2>Willkommen bei Together.</h2><p>Gib deinen Namen ein, um dein Konto zu öffnen. Neue Namen erstellen ein neues Mitglied.</p><form id="auth-form"><label>Dein Name<input name="name" autocomplete="username" placeholder="Dein Name" maxlength="60" required autofocus></label><p class="form-error" id="auth-error" role="alert"></p><button class="primary full" type="submit">Anmelden ${icon('arrow')}</button></form><div class="auth-private">Nur im vertrauenswürdigen LAN nutzen: Jeder kann sich mit jedem Namen anmelden.</div></div></section></main>`;
+  window.togetherTheme.sync();
+  $('#auth-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = $('button[type="submit"]', form);
+    button.disabled = true;
+    $('#auth-error').textContent = '';
+    try {
+      await api('login', Object.fromEntries(new FormData(form)));
+      history.replaceState(null, '', '/'); inviteToken = '';
+      await boot();
+    } catch (error) { $('#auth-error').textContent = error.message; }
+    finally { button.disabled = false; }
+  });
 }
 
 function renderAuth(mode, error = '') {
@@ -445,7 +464,7 @@ async function uploadFiles(files) {
         const request = new XMLHttpRequest();
         request.open('POST', `/api/files?${new URLSearchParams({ listId, name: file.name })}`);
         request.setRequestHeader('Content-Type', 'application/octet-stream');
-        request.timeout = 24 * 60 * 60 * 1000;
+        request.timeout = 0;
         request.upload.onprogress = event => {
           if (event.lengthComputable) { uploading.percent = Math.round(event.loaded / event.total * 100); renderUploadStatus(); }
         };
@@ -512,9 +531,10 @@ async function saveDraft(draft) {
   if (!canEdit(draft.listId)) return;
   if (draft.saving || composing || (!draft.sent && draft.content === draft.base)) return;
   if (!state?.sheets.some(sheet => sheet.id === draft.id)) return;
-  draft.sent ||= { id: crypto.randomUUID(), operation: difference(draft.base, draft.content), content: draft.content, version: draft.version };
-  draft.saving = true; draft.error = ''; renderSheets();
+  draft.saving = true; draft.error = '';
   try {
+    draft.sent ||= { id: createOperationId(), operation: difference(draft.base, draft.content), content: draft.content, version: draft.version };
+    renderSheets();
     const { sheet } = await api('sheet', { sheetId: draft.id, version: draft.sent.version, operationId: draft.sent.id, operation: draft.sent.operation });
     if (drafts.get(draft.id) !== draft) return;
     if (composing) await new Promise(resolve => $('#sheet-editor').addEventListener('compositionend', resolve, { once: true }));
@@ -709,6 +729,10 @@ function confirmAction(title, description, label, callback) {
 }
 function showInvite() {
   const owner = state.me.role === 'owner';
+  if (state.nameOnlyLogin) {
+    modal('Zusammen im lokalen Netzwerk.', `<p class="modal-description">Teile diese Adresse: <strong>${escape(location.origin)}</strong>. Neue Mitglieder müssen nur ihren Namen eingeben. Teile anschließend einzelne Listen über List options → Manage access.</p><div class="member-list">${state.members.map(member => `<div class="member"><span class="avatar">${escape(initials(member.name))}</span><span class="member-info"><strong>${escape(member.name)}${member.id === state.me.id ? ' (du)' : ''}</strong></span>${member.role === 'owner' ? '<span class="role-badge">Owner</span>' : owner ? `<button class="icon-button" data-command="remove-member" data-id="${escape(member.id)}" aria-label="Remove ${escape(member.name)}">${icon('close')}</button>` : '<span class="role-badge">Member</span>'}</div>`).join('')}</div><p class="modal-footnote">Ohne Passwort kann jeder im Netzwerk fremde Namen verwenden. Entfernte Namen können erneut registriert werden, erhalten aber keine alten Listenrechte.</p>`, true);
+    return;
+  }
   modal('Good company. Shared plans.', `<p class="modal-description">${owner ? 'Invite a friend by email address. Only that address can use their personal link to create an account. Then share individual lists using List options → Manage access.' : 'Each list owner decides who can view or edit their list. Ask the notebook owner to invite more friends.'}</p>
     ${owner ? '<form id="invite-form"><label>Your friend’s email<div class="inline-input"><input type="email" name="email" placeholder="friend@example.com" maxlength="254" required autofocus><button class="primary" type="submit">Create link '+icon('arrow')+'</button></div></label></form><div id="invite-result"></div>' : ''}
     <h3 class="member-heading">IN THIS NOTEBOOK <span>${state.members.length}</span></h3><div class="member-list">${state.members.map(member => `<div class="member"><span class="avatar">${escape(initials(member.name))}</span><span class="member-info"><strong>${escape(member.name)}${member.id === state.me.id ? ' <small>(you)</small>' : ''}</strong><small>${escape(member.email)}</small></span>${member.role === 'owner' ? '<span class="role-badge">Owner</span>' : owner ? `<button class="icon-button" data-command="remove-member" data-id="${escape(member.id)}" aria-label="Remove ${escape(member.name)}">${icon('close')}</button>` : '<span class="role-badge">Member</span>'}</div>`).join('')}</div>
@@ -727,6 +751,10 @@ function showInvite() {
   });
 }
 function accountSettings() {
+  if (state.nameOnlyLogin) {
+    modal('Dein Konto.', `<p class="modal-description">Angemeldet als <strong>${escape(state.me.name)}</strong>. Die Anmeldung erfolgt hier nur mit Namen.</p><button class="sign-out" data-command="logout">${icon('logout')} Abmelden / Namen wechseln</button>`);
+    return;
+  }
   modal('Your little corner.', `<p class="modal-description">Signed in as <strong>${escape(state.me.email)}</strong>.</p><form id="password-form"><label>Current password<input type="password" name="currentPassword" autocomplete="current-password" maxlength="128" required></label><label>New password<input type="password" name="password" autocomplete="new-password" minlength="10" maxlength="128" placeholder="At least 10 characters" required></label><button class="primary full" type="submit">Update password ${icon('lock')}</button></form><button class="sign-out" data-command="logout">${icon('logout')} Sign out</button>`);
   $('#password-form').addEventListener('submit', async event => {
     event.preventDefault();

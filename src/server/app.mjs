@@ -44,7 +44,14 @@ async function body(request, limit = 16000) {
   return input;
 }
 
-export async function createApp({ database = process.env.DATABASE_PATH || './data/together.sqlite', appUrl = process.env.APP_URL || '' } = {}) {
+export async function createApp({ database = process.env.DATABASE_PATH || './data/together.sqlite', appUrl = process.env.APP_URL || '', allowedOrigins = process.env.APP_ALLOWED_ORIGINS || '', nameOnlyLogin = process.env.LOCAL_NAME_LOGIN === 'true' } = {}) {
+  const additionalOrigins = new Set(allowedOrigins.split(',').map(value => value.trim()).filter(Boolean).map(value => {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.hostname.includes('*') || url.origin !== value) {
+      throw new Error('APP_ALLOWED_ORIGINS must contain comma-separated, exact HTTP(S) origins without paths or credentials.');
+    }
+    return url.origin;
+  }));
   const db = openDatabase(database);
   const uploadDirectory = database === ':memory:' ? await mkdtemp(join(tmpdir(), 'together-files-')) : join(dirname(resolve(database)), basename(database) + '-files');
   mkdirSync(uploadDirectory, { recursive: true });
@@ -113,7 +120,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
     const visible = new Set(lists.map(list => list.id));
     return {
       revision: revision(), name: db.prepare("SELECT value FROM settings WHERE key = 'name'").get().value,
-      me: publicUser(user),
+      me: publicUser(user), nameOnlyLogin,
       lists: lists.map(list => ({ ...list, grants: list.permission === 'owner'
         ? db.prepare('SELECT user_id, permission FROM list_permissions WHERE list_id = ? ORDER BY user_id').all(list.id) : [] })),
       tasks: db.prepare('SELECT * FROM tasks ORDER BY created_at, id').all().filter(task => visible.has(task.list_id)),
@@ -174,7 +181,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
       if (!url.pathname.startsWith('/api/')) fail(404, 'Not found.');
       const user = sessionUser(db, request);
       if (method === 'GET' && url.pathname === '/api/session') {
-        return respond({ user: user ? publicUser(user) : null, setupNeeded: !db.prepare('SELECT id FROM users LIMIT 1').get() });
+        return respond({ user: user ? publicUser(user) : null, setupNeeded: !db.prepare('SELECT id FROM users LIMIT 1').get(), nameOnlyLogin });
       }
       if (method === 'GET' && url.pathname === '/api/invitation') {
         const rawToken = url.searchParams.get('token') || '';
@@ -229,7 +236,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
       }
       if (method !== 'POST') fail(405, 'Method not allowed.');
       const expectedOrigin = configuredOrigin || `http://${request.headers.host}`;
-      if ((request.headers.origin && request.headers.origin !== expectedOrigin) || request.headers['sec-fetch-site'] === 'cross-site') fail(403, 'Please make changes from Together.');
+      if ((request.headers.origin && request.headers.origin !== expectedOrigin && !additionalOrigins.has(request.headers.origin)) || request.headers['sec-fetch-site'] === 'cross-site') fail(403, 'Please make changes from Together.');
       if (url.pathname === '/api/files') {
         if (!user) fail(401, 'Please sign in to upload files.');
         const listId = text({ listId: url.searchParams.get('listId') }, 'listId', 100);
@@ -275,6 +282,7 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
       const input = await body(request, url.pathname === '/api/sheet' ? 1200000 : 16000);
 
       if (url.pathname === '/api/setup' || url.pathname === '/api/register') {
+        if (nameOnlyLogin) fail(403, 'Please sign in with your name.');
         const { email, password } = credentials(input);
         rateLimit(request, email);
         const name = text(input, 'name', 60);
@@ -302,6 +310,32 @@ export async function createApp({ database = process.env.DATABASE_PATH || './dat
         return respond({ ok: true }, 201, { 'Set-Cookie': cookie });
       }
       if (url.pathname === '/api/login') {
+        if (nameOnlyLogin) {
+          const name = text(input, 'name', 60).normalize('NFC');
+          rateLimit(request, name.toLocaleLowerCase('en-US'));
+          // Existing accounts keep their IDs, passwords, lists, and grants.
+          const matches = db.prepare('SELECT id, name FROM users').all().filter(account => account.name.trim().normalize('NFC').toLocaleLowerCase('en-US') === name.toLocaleLowerCase('en-US'));
+          if (matches.length > 1) fail(409, 'Several accounts have this name. Ask the administrator to give them unique names.');
+          let accountId = matches[0]?.id;
+          let created = false;
+          if (!accountId) {
+            const storedHash = await passwordHash(token());
+            transaction(db, () => {
+              // Recheck after hashing so concurrent first sign-ins cannot create duplicates.
+              const existing = db.prepare('SELECT id, name FROM users').all().find(account => account.name.trim().normalize('NFC').toLocaleLowerCase('en-US') === name.toLocaleLowerCase('en-US'));
+              if (existing) { accountId = existing.id; return; }
+              accountId = randomUUID();
+              const role = db.prepare('SELECT id FROM users LIMIT 1').get() ? 'member' : 'owner';
+              db.prepare('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)').run(accountId, `${accountId}@local.invalid`, name, storedHash, role, Date.now());
+              if (role === 'owner') db.prepare('INSERT INTO lists (id,title,color,created_at,owner_id) VALUES (?, ?, ?, ?, ?)').run(randomUUID(), 'My first list', 'purple', Date.now(), accountId);
+              created = true;
+              bump();
+            });
+          }
+          const cookie = createSession(db, accountId, secure);
+          if (created) broadcast();
+          return respond({ ok: true }, created ? 201 : 200, { 'Set-Cookie': cookie });
+        }
         const { email, password } = credentials(input);
         rateLimit(request, email);
         const account = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
